@@ -1,4 +1,5 @@
 import { activityStateLabel, formatElapsed } from './activity-format.js'
+import { bubbleSurfaceState } from './bubble-surface.js'
 
 const pet = document.getElementById('pet')
 const petImg = document.getElementById('pet-img')
@@ -7,6 +8,8 @@ const face = pet.querySelector('.face')
 const badge = document.getElementById('badge')
 const bubble = document.getElementById('bubble')
 const activityHud = document.getElementById('activity-hud')
+const hudMessage = document.getElementById('hud-message')
+const hudMessageText = document.getElementById('hud-message-text')
 const activityList = document.getElementById('activity-list')
 const STATES = ['idle', 'thinking', 'ready', 'chatting']
 
@@ -20,6 +23,7 @@ let petSizePercent = 100
 let bubbleSizePercent = 100
 let hudSizePercent = 100
 let showActivityHud = true
+let bubbleActive = false
 
 function imageMode() {
   return Object.keys(images).length > 0
@@ -203,13 +207,14 @@ function setHudSize(value) {
 }
 
 function updateHudVisibility() {
-  activityHud.classList.toggle('hidden', !showActivityHud || activityList.childElementCount === 0)
+  const state = bubbleSurfaceState({ active: bubbleActive, showActivityHud, activityCount: activityList.childElementCount })
+  activityHud.classList.toggle('hidden', !state.hudVisible)
   syncSize()
 }
 
 function setHudVisibility(value) {
   showActivityHud = value !== false
-  updateHudVisibility()
+  renderBubbleSurface()
 }
 
 window.watchpup.settingsGet().then((cfg) => {
@@ -324,16 +329,27 @@ let bubbleTimer = null
 let chatStreaming = false
 let chatBuf = ''
 
+function renderBubbleSurface() {
+  const state = bubbleSurfaceState({ active: bubbleActive, showActivityHud, activityCount: activityList.childElementCount })
+  bubble.classList.toggle('hidden', !state.bubbleVisible)
+  hudMessage.classList.toggle('hidden', !state.hudMessageVisible)
+  updateHudVisibility()
+}
+
+function hideBubbleSurface() {
+  bubbleActive = false
+  renderBubbleSurface()
+}
+
 function showBubble(text, hideAfterMs) {
   bubble.textContent = text
-  bubble.classList.remove('hidden')
-  syncSize()
+  hudMessageText.textContent = text
+  hudMessage.title = text
+  bubbleActive = true
+  renderBubbleSurface()
   if (bubbleTimer) clearTimeout(bubbleTimer)
   if (hideAfterMs) {
-    bubbleTimer = setTimeout(() => {
-      bubble.classList.add('hidden')
-      syncSize()
-    }, hideAfterMs)
+    bubbleTimer = setTimeout(hideBubbleSurface, hideAfterMs)
   }
 }
 
@@ -346,7 +362,9 @@ window.watchpup.onBubble((payload) => {
   if (chatStreaming) return
   bubbleMentionId = id || null
   bubble.classList.remove('streaming')
+  hudMessage.classList.remove('streaming')
   bubble.classList.toggle('clickable', !!bubbleMentionId)
+  hudMessage.classList.toggle('clickable', !!bubbleMentionId)
   showBubble(text, 30000)
 })
 
@@ -358,6 +376,7 @@ window.watchpup.onChatBubble((ev) => {
     chatStreaming = true
     chatBuf = ''
     bubble.classList.add('streaming')
+    hudMessage.classList.add('streaming')
     showBubble('…', null)
     return
   }
@@ -369,11 +388,13 @@ window.watchpup.onChatBubble((ev) => {
   } else if (type === 'result') {
     chatStreaming = false
     bubble.classList.remove('streaming')
+    hudMessage.classList.remove('streaming')
     showBubble(ev.text || chatBuf || '(빈 응답)', 20000)
     bubble.scrollTop = bubble.scrollHeight
   } else if (type === 'error') {
     chatStreaming = false
     bubble.classList.remove('streaming')
+    hudMessage.classList.remove('streaming')
     showBubble('오류: ' + (ev.message || '알 수 없음'), 9000)
   }
 })
@@ -382,13 +403,14 @@ bubble.addEventListener('mouseenter', () => window.watchpup.setMouseIgnore(false
 bubble.addEventListener('mouseleave', () => window.watchpup.setMouseIgnore(true))
 activityHud.addEventListener('mouseenter', () => window.watchpup.setMouseIgnore(false))
 activityHud.addEventListener('mouseleave', () => window.watchpup.setMouseIgnore(true))
-// 말풍선 클릭 → 스레드가 연결돼 있으면 그 스레드를 열고, 아니면 패널 토글
-bubble.addEventListener('click', () => {
+// 말풍선/HUD 상태 줄 클릭 → 스레드가 연결돼 있으면 그 스레드를 열고, 아니면 패널 토글
+function openBubbleTarget() {
   if (bubbleMentionId) window.watchpup.openMention(bubbleMentionId)
   else window.watchpup.togglePanel()
-  bubble.classList.add('hidden')
-  syncSize()
-})
+  hideBubbleSurface()
+}
+bubble.addEventListener('click', openBubbleTarget)
+hudMessage.addEventListener('click', openBubbleTarget)
 
 // ---- click-through 토글 (몸통 위에서만 상호작용) ----
 pet.addEventListener('mouseenter', () => window.watchpup.setMouseIgnore(false))

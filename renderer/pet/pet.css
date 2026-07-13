@@ -71,6 +71,51 @@ body {
   pointer-events: auto;
 }
 .activity-hud.hidden { display: none; }
+.hud-message {
+  width: 100%;
+  min-height: var(--hud-row-height);
+  display: grid;
+  grid-template-columns: var(--hud-dot-column) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--hud-row-gap);
+  box-sizing: border-box;
+  margin: 0 0 2px;
+  padding: 4px var(--hud-row-padding);
+  border: 0;
+  border-radius: var(--hud-row-radius);
+  background: rgba(255, 255, 255, 0.07);
+  color: #f5f5f7;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.hud-message.hidden { display: none; }
+.hud-message:hover { background: rgba(255, 255, 255, 0.1); }
+.hud-message:active { background: rgba(255, 255, 255, 0.13); }
+.hud-message:focus-visible { outline: 2px solid rgba(83, 155, 245, 0.9); outline-offset: -2px; }
+.hud-message-dot {
+  width: var(--hud-dot-size);
+  height: var(--hud-dot-size);
+  border-radius: 50%;
+  background: #6fa9ef;
+  box-shadow: 0 0 0 3px rgba(111, 169, 239, 0.13);
+}
+.hud-message.streaming .hud-message-dot {
+  background: #50d890;
+  box-shadow: 0 0 0 3px rgba(80, 216, 144, 0.14);
+}
+.hud-message-text {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: var(--hud-title-size);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.12px;
+  word-break: break-word;
+}
 .activity-list { display: grid; gap: 2px; }
 .activity-row {
   width: 100%;
