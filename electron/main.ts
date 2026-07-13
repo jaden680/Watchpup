@@ -28,6 +28,7 @@ import { localRelaunchArgs } from '../src/core/watchpup/relaunch.js'
 import { LocalAgentPoller } from '../src/core/activity/session-poller.js'
 import { mergeActivities, slackActivities } from '../src/core/activity/merge.js'
 import { activityTarget } from './activity-link.js'
+import { resolveWatchpupConfigPath } from '../src/core/config/path.js'
 
 let pet: BrowserWindow | null = null
 let panel: BrowserWindow | null = null
@@ -61,7 +62,7 @@ function sendPetState(s: PetState): void {
 
 async function main(): Promise<void> {
   // 1) deps 구성 (src/core/cli/run.ts와 동일 방식)
-  const configStore = new ConfigStore()
+  const configStore = new ConfigStore(resolveWatchpupConfigPath())
   const config = configStore.get()
   bubbleStyle = config.bubbleStyle
   const mentions = new MentionStore(join(config.dataDir, 'mentions'))
