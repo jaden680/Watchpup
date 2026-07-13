@@ -12,6 +12,7 @@ let theme = THEMES.paw || { idle: '🐾', thinking: '🐾', ready: '🐾', chatt
 let images = {} // 상태별 file:// 경로 (하나라도 있으면 이미지 모드)
 let codex = null // { spritesheet, displayName } | null (설정 시 gif/이모지보다 우선)
 let currentState = 'idle'
+let petSizePercent = 100
 
 function imageMode() {
   return Object.keys(images).length > 0
@@ -21,7 +22,7 @@ function codexMode() {
 }
 
 // ---- Codex Pet 스프라이트 프레임 루프 ----
-const CODEX_DISPLAY_H = 128 // 펫 표시 높이(PET_AREA와 동일하게 유지)
+const BASE_CODEX_DISPLAY_H = 128 // 펫 표시 높이(PET_AREA와 동일하게 유지)
 let codexFrameIndex = 0
 let codexTimer = null
 // passive(idle/ready) 상태에서 한 종류만 돌지 않도록 여러 동작을 번갈아 재생.
@@ -57,7 +58,7 @@ function codexTick() {
     row = rows[0]
   }
   if (codexFrameIndex >= row.frames) codexFrameIndex = 0
-  const scale = CODEX_DISPLAY_H / atlas.cellH
+  const scale = (BASE_CODEX_DISPLAY_H * petSizePercent / 100) / atlas.cellH
   const w = Math.round(atlas.cellW * scale)
   const h = Math.round(atlas.cellH * scale)
   petSprite.style.width = w + 'px'
@@ -137,12 +138,31 @@ function setCodex(v) {
   applyFace()
 }
 
-window.watchpup.settingsGet().then((cfg) => setTheme(cfg?.petTheme)).catch(() => {})
+function setPetSize(value) {
+  const parsed = Number(value)
+  petSizePercent = Number.isFinite(parsed) ? Math.max(50, Math.min(200, Math.round(parsed))) : 100
+  const scale = petSizePercent / 100
+  document.documentElement.style.setProperty('--pet-circle-size', `${Math.round(104 * scale)}px`)
+  document.documentElement.style.setProperty('--pet-media-size', `${Math.round(128 * scale)}px`)
+  document.documentElement.style.setProperty('--pet-face-size', `${Math.round(46 * scale)}px`)
+  if (codexMode()) {
+    stopCodexLoop()
+    codexFrameIndex = 0
+    startCodexLoop()
+  }
+  syncSize()
+}
+
+window.watchpup.settingsGet().then((cfg) => {
+  setTheme(cfg?.petTheme)
+  setPetSize(cfg?.petSizePercent)
+}).catch(() => {})
 window.watchpup.petImages().then(setImages).catch(() => {})
 window.watchpup.petCodex().then(setCodex).catch(() => {})
 if (window.watchpup.onPetTheme) window.watchpup.onPetTheme((n) => setTheme(typeof n === 'string' ? n : undefined))
 if (window.watchpup.onPetImages) window.watchpup.onPetImages(setImages)
 if (window.watchpup.onPetCodex) window.watchpup.onPetCodex(setCodex)
+if (window.watchpup.onPetSize) window.watchpup.onPetSize(setPetSize)
 
 window.watchpup.onPet((s) => {
   currentState = STATES.includes(s) ? s : 'idle'
@@ -163,14 +183,15 @@ window.watchpup.onBadge((n) => {
 
 // ---- 말풍선 + 다이나믹 창 크기 ----
 // 말풍선 내용에 맞춰 펫 창 높이를 조절(하단 고정 → 위로 확장). main의 pet.resize가 처리.
-const PET_AREA = 128 // 펫 영역 높이(이미지/코덱스 스프라이트 최대) 근사
+const BASE_PET_AREA = 128 // 펫 영역 높이(이미지/코덱스 스프라이트 최대) 근사
 // 상단패딩(10) + 스프라이트(128) + 하단패딩(12) + 그림자/발 여유(14) — 코덱스 스프라이트가 잘리지 않도록 여유 확보
 const PET_CHROME = 10 + 12 + 14
 function syncSize() {
   requestAnimationFrame(() => {
     const visible = !bubble.classList.contains('hidden')
     const bubbleH = visible ? bubble.getBoundingClientRect().height : 0
-    const need = PET_AREA + (visible ? bubbleH + 19 : 0) + PET_CHROME
+    const petArea = BASE_PET_AREA * petSizePercent / 100
+    const need = petArea + (visible ? bubbleH + 19 : 0) + PET_CHROME
     window.watchpup.petResize(Math.ceil(need))
   })
 }

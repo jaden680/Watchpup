@@ -473,8 +473,9 @@ async function main(): Promise<void> {
     const c = configStore.update(merged)
     deps.config = c
     bubbleStyle = c.bubbleStyle // 말풍선 표시 방식 즉시 반영 (persona는 다음 분석부터 config로 자동 반영)
-    // 펫 테마·커스텀 이미지·Codex Pet 팩은 재시작 없이 즉시 반영
+    // 펫 테마·크기·커스텀 이미지·Codex Pet 팩은 재시작 없이 즉시 반영
     send(pet, EVT.petTheme, c.petTheme)
+    send(pet, EVT.petSize, c.petSizePercent)
     send(pet, EVT.petImages, petImagesFromDir(c.petImageDir))
     send(pet, EVT.petCodex, resolveCodexPet(c.petCodexDir))
     if (pet && !pet.isDestroyed()) pet.setAlwaysOnTop(c.petAlwaysOnTop) // 즉시 반영

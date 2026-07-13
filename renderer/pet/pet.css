@@ -4,6 +4,9 @@
   --bubble-fg: #17140f;
   --bubble-outline: #17140f;
   --accent: #d98829;
+  --pet-circle-size: 104px;
+  --pet-media-size: 128px;
+  --pet-face-size: 46px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -93,8 +96,8 @@ body {
 #pet {
   position: relative;
   flex: 0 0 auto;
-  width: 104px;
-  height: 104px;
+  width: var(--pet-circle-size);
+  height: var(--pet-circle-size);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -112,7 +115,7 @@ body {
 }
 
 .face {
-  font-size: 46px;
+  font-size: var(--pet-face-size);
   line-height: 1;
   pointer-events: none;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2));
@@ -123,8 +126,8 @@ body {
 
 /* 커스텀 이미지 모드: 공모양 배경/그림자/애니메이션 제거, 이미지 자유 */
 #pet.img-mode {
-  width: 128px;
-  height: 128px;
+  width: var(--pet-media-size);
+  height: var(--pet-media-size);
   border-radius: 0;
   background: none !important;
   box-shadow: none !important;

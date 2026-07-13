@@ -6,6 +6,9 @@ model: opus            # claude 모델 (opus | sonnet | ...)
 maxBudgetUsd: 0        # 0 = 무제한(구독). 양수면 요청당 상한.
 maxConcurrency: 2
 
+# 화면에 표시할 펫 크기(50~200%)
+petSizePercent: 100
+
 # 감지 대상 = 나 (필수) — Slack 프로필의 member ID (예: U01ABCDEF)
 mySlackUserId: ""
 # 내가 참여한 스레드의 후속 메시지도 감지할지

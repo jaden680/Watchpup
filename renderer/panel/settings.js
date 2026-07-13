@@ -105,6 +105,14 @@ showSset('detect')
 // ---- 설정 ----
 const settingsForm = document.getElementById('settings-form')
 const settingsStatus = document.getElementById('settings-status')
+const petSizeInput = settingsForm.elements['petSizePercent']
+const petSizeValue = document.getElementById('pet-size-value')
+
+function updatePetSizeLabel() {
+  if (petSizeInput && petSizeValue) petSizeValue.textContent = `${petSizeInput.value}%`
+}
+
+if (petSizeInput) petSizeInput.addEventListener('input', updatePetSizeLabel)
 
 async function loadSettings() {
   const cfg = await window.watchpup.settingsGet()
@@ -112,6 +120,8 @@ async function loadSettings() {
   settingsForm.elements['followThreads'].checked = !!cfg.followThreads
   settingsForm.elements['petTheme'].value = cfg.petTheme || 'paw'
   if (settingsForm.elements['petAlwaysOnTop']) settingsForm.elements['petAlwaysOnTop'].checked = cfg.petAlwaysOnTop !== false
+  if (petSizeInput) petSizeInput.value = String(cfg.petSizePercent ?? 100)
+  updatePetSizeLabel()
   if (settingsForm.elements['persona']) settingsForm.elements['persona'].value = cfg.persona || ''
   if (settingsForm.elements['bubbleStyle']) settingsForm.elements['bubbleStyle'].value = cfg.bubbleStyle || 'status'
   const petimgPathEl = document.getElementById('petimg-path')
@@ -480,6 +490,7 @@ settingsForm.addEventListener('submit', async (e) => {
     followThreads: settingsForm.elements['followThreads'].checked,
     petTheme: settingsForm.elements['petTheme'].value,
     petAlwaysOnTop: settingsForm.elements['petAlwaysOnTop'] ? settingsForm.elements['petAlwaysOnTop'].checked : true,
+    petSizePercent: petSizeInput ? parseInt(petSizeInput.value, 10) : 100,
     persona: settingsForm.elements['persona'] ? settingsForm.elements['persona'].value.trim() : '',
     bubbleStyle: settingsForm.elements['bubbleStyle'] ? settingsForm.elements['bubbleStyle'].value : 'status',
     enableBot: settingsForm.elements['enableBot'].checked,

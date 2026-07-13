@@ -73,6 +73,8 @@ export const watchpupConfigSchema = z.object({
   petTheme: z.string().default('paw'),
   // 펫을 항상 다른 창 위에 표시할지 (off면 일반 창처럼 뒤로 갈 수 있음)
   petAlwaysOnTop: z.boolean().default(true),
+  // 펫 표시 크기(%). 이모지·커스텀 이미지·Codex Pet에 공통 적용.
+  petSizePercent: z.number().int().min(50).max(200).default(100),
   // 커스텀 펫 이미지 폴더(설정 시 이모지 대신 이미지 사용, 공모양 배경 제거).
   // 폴더에 idle/thinking/ready/chatting.(gif|png|apng|webp|jpg) 파일을 두면 상태별로 사용.
   petImageDir: z.string().default(''),

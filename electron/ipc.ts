@@ -27,6 +27,7 @@ export const EVT = {
   petTheme: 'pet.theme',
   petImages: 'pet.images',
   petCodex: 'pet.codex',
+  petSize: 'pet.size',
   actionStream: 'action.stream',
   actionDone: 'action.done',
 } as const
@@ -66,6 +67,7 @@ export interface SettingsPatch {
   ingestMaxAgeDays?: number
   petTheme?: string
   petAlwaysOnTop?: boolean
+  petSizePercent?: number
   petImageDir?: string
   petCodexDir?: string
   persona?: string
