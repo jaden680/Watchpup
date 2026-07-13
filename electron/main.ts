@@ -354,11 +354,11 @@ async function main(): Promise<void> {
     const requestedHeight = typeof value === 'number' ? value : value?.height
     const requestedWidth = typeof value === 'number' ? b.width : value?.width
     if (typeof requestedHeight !== 'number' || typeof requestedWidth !== 'number') return
+    const workArea = screen.getDisplayMatching(b).workArea
     const h = Math.max(164, Math.min(800, Math.round(requestedHeight)))
-    const w = Math.max(340, Math.min(620, Math.round(requestedWidth)))
+    const w = Math.max(340, Math.min(workArea.width, 860, Math.round(requestedWidth)))
     if (h === b.height && w === b.width) return
     const bottom = b.y + b.height
-    const workArea = screen.getDisplayMatching(b).workArea
     const requestedX = typeof value === 'object' && value?.anchor === 'left'
       ? b.x
       : b.x + b.width - w

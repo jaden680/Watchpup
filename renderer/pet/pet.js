@@ -289,8 +289,9 @@ window.watchpup.onBadge((n) => {
 // ---- 말풍선 + 다이나믹 창 크기 ----
 // 말풍선 내용에 맞춰 펫 창 높이를 조절(하단 고정 → 위로 확장). main의 pet.resize가 처리.
 const BASE_PET_AREA = 128 // 펫 영역 높이(이미지/코덱스 스프라이트 최대) 근사
-// 상단패딩(10) + 스프라이트(128) + 하단패딩(12) + 그림자/발 여유(14) — 코덱스 스프라이트가 잘리지 않도록 여유 확보
-const PET_CHROME = 10 + 12 + 14
+const HUD_SAFE_X = 28
+// 상단패딩(10) + HUD 그림자 안전 여백(34) + 펫 그림자/발 여유(14)
+const PET_CHROME = 10 + 34 + 14
 function syncSize() {
   requestAnimationFrame(() => {
     const visible = !bubble.classList.contains('hidden')
@@ -302,8 +303,8 @@ function syncSize() {
     const gaps = Math.max(0, visibleBlocks - 1) * 12
     const need = petArea + bubbleH + hudH + gaps + PET_CHROME
     // 현재 창이 좁아도 설정값 기준 목표 폭을 계산해야 다시 넓힐 수 있다.
-    const expandedHudWidth = Math.ceil(532 * hudSizePercent / 100 + 28)
-    const foldedHudWidth = Math.ceil(Math.max(150, 190 * hudSizePercent / 100) + 28)
+    const expandedHudWidth = Math.ceil(532 * hudSizePercent / 100 + HUD_SAFE_X * 2)
+    const foldedHudWidth = Math.ceil(Math.max(150, 190 * hudSizePercent / 100) + HUD_SAFE_X * 2)
     const hudWidth = hudVisible ? (hudFolded ? foldedHudWidth : expandedHudWidth) : 0
     window.watchpup.petResize({
       width: hudVisible ? Math.max(340, hudWidth) : 340,

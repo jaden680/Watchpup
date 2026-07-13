@@ -29,6 +29,8 @@
   --hud-meta-size: 10px;
   --hud-elapsed-width: 31px;
   --hud-fold-width: 190px;
+  --surface-safe-x: 28px;
+  --surface-safe-bottom: 34px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -52,7 +54,7 @@ body {
   align-items: flex-end;
   justify-content: flex-end;
   gap: 12px;
-  padding: 10px 14px 12px;
+  padding: 10px var(--surface-safe-x) var(--surface-safe-bottom);
   box-sizing: border-box;
 }
 
@@ -69,7 +71,7 @@ body.hud-align-right { align-items: flex-end; }
   background: rgba(19, 21, 24, 0.94);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 10px 28px rgba(0, 0, 0, 0.36);
+    0 8px 22px rgba(0, 0, 0, 0.36);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   pointer-events: auto;
