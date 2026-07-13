@@ -199,9 +199,7 @@ async function main(): Promise<void> {
     if (target.kind === 'external') {
       void shell.openExternal(target.url)
     } else {
-      const mention = mentions.get(target.id)
-      if (mention?.permalink) void shell.openExternal(mention.permalink)
-      else openMentionPanel(target.id)
+      openMentionPanel(target.id)
     }
   })
   ipcMain.on('pet.setMouseIgnore', (_e, ignore: boolean) => {

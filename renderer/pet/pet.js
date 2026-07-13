@@ -362,9 +362,9 @@ function renderActivities(rows) {
     const open = document.createElement('button')
     open.type = 'button'
     open.className = 'activity-open'
-    open.textContent = '열기'
+    open.textContent = activity.source === 'slack' ? '상세' : '열기'
     open.disabled = activity.canOpen === false
-    const directTarget = activity.source === 'slack' ? 'Slack 스레드' : `${ACTIVITY_NAMES[activity.source]} 세션`
+    const directTarget = activity.source === 'slack' ? 'Watchpup 스레드 상세' : `${ACTIVITY_NAMES[activity.source]} 세션`
     open.title = open.disabled ? '직접 열 수 없는 항목입니다' : `${directTarget}으로 이동`
     open.setAttribute('aria-label', open.title)
     open.addEventListener('click', (event) => {
