@@ -24,6 +24,7 @@ import { petImagesFromDir, listCodexPets as listCodexPetsAt, resolveCodexPet } f
 import { readGlobalMcpCandidates } from './mcp-import.js'
 import { addGithubRepo } from './repos-github.js'
 import { integrationStatus, connectNotion, connectJira, disconnectIntegration } from './integrations.js'
+import { localRelaunchArgs } from '../src/core/watchpup/relaunch.js'
 
 let pet: BrowserWindow | null = null
 let panel: BrowserWindow | null = null
@@ -205,7 +206,9 @@ async function main(): Promise<void> {
 
   // 설정 저장 후 재시작 반영
   ipcMain.on('app.restart', () => {
-    app.relaunch()
+    const args = app.isPackaged ? undefined : localRelaunchArgs(process.argv, process.cwd())
+    if (args) app.relaunch({ args })
+    else app.relaunch()
     app.exit(0)
   })
 
