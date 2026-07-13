@@ -16,6 +16,7 @@ export class ConfigStore extends EventEmitter {
   private envOverrides(): Record<string, unknown> {
     const o: Record<string, unknown> = {}
     if (process.env.WATCHPUP_DATA_DIR) o.dataDir = process.env.WATCHPUP_DATA_DIR
+    if (process.env.WATCHPUP_WORK_DIR) o.workDir = process.env.WATCHPUP_WORK_DIR
     if (process.env.WATCHPUP_KEYCHAIN_SERVICE) o.keychainService = process.env.WATCHPUP_KEYCHAIN_SERVICE
     if (process.env.WATCHPUP_MODEL) o.model = process.env.WATCHPUP_MODEL
     if (process.env.WATCHPUP_MY_SLACK_USER_ID) o.mySlackUserId = process.env.WATCHPUP_MY_SLACK_USER_ID
