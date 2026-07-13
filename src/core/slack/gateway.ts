@@ -25,6 +25,7 @@ import { AuditStore } from '../observability/audit.js'
 import { SearchPoller, type RawMention } from './search-poller.js'
 import { ThreadFollowPoller } from './thread-poller.js'
 import { decideIngest } from './ingest-filter.js'
+import { compareSlackTs, latestSlackTs } from './timestamp.js'
 import { threadText as buildThreadText, actionContext, devContext, devTitle } from '../watchpup/mention-context.js'
 
 export interface GatewayDeps {
@@ -179,6 +180,11 @@ export class WatchpupGateway extends EventEmitter {
     }
     const resolved: RawMention = { ...raw, threadTs }
     const key = threadKey(resolved.channel, threadTs)
+    const cursor = this.deps.state.getThreadCursor(key)
+    if (cursor && compareSlackTs(resolved.messageTs, cursor) <= 0) {
+      logger.info('이미 읽은 스레드 메시지 수집 제외', { channel: resolved.channel, ts: resolved.messageTs })
+      return
+    }
     void this.deps.mutex.run(key, () => this.deps.semaphore.run(() => this.ingest(resolved, client)))
   }
 
@@ -198,6 +204,10 @@ export class WatchpupGateway extends EventEmitter {
         resolveMentions(client, stripMention(raw.text, myId)).then((t) => resolveSubteams(client, t)).then(formatSlackPlain),
       ])
       const threadText = thread.map((m) => `${m.author}: ${m.text.replace(/\s+/g, ' ').trim()}`).join('\n')
+      // fetchThreadMessages로 실제 읽은 최신 메시지까지 즉시 기록한다. 새 스레드를 추적 목록에
+      // 넣기 전에 저장해 후속 폴러가 과거 답글을 새 메시지로 재수집하지 않게 한다.
+      const latestReadTs = latestSlackTs([raw.messageTs, ...thread.map((m) => m.ts)]) ?? raw.messageTs
+      this.deps.state.setThreadCursor(tKey, latestReadTs)
       const placeholder: Mention = {
         id, channel: raw.channel, channelName, threadTs: raw.threadTs, messageTs: raw.messageTs,
         permalink, authorId: raw.authorId, authorName, text, mentionedAt: Date.now(),

@@ -27,6 +27,13 @@ describe('StateStore', () => {
     expect(s.getThreadCursor('C1:100.000001')).toBe('100.000002')
     expect(new StateStore(path).getThreadCursor('C1:100.000001')).toBe('100.000002')
   })
+  it('never moves a thread cursor backwards', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'watchpup-st-')), 'state.json')
+    const s = new StateStore(path)
+    s.setThreadCursor('C1:100.000001', '100.000010')
+    s.setThreadCursor('C1:100.000001', '100.000002')
+    expect(s.getThreadCursor('C1:100.000001')).toBe('100.000010')
+  })
   it('derives tracked threads from threadToMentionId, splitting on the first colon', () => {
     const path = join(mkdtempSync(join(tmpdir(), 'watchpup-st-')), 'state.json')
     const s = new StateStore(path)
