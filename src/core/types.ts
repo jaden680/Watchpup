@@ -98,4 +98,21 @@ export interface ThreadReaction {
   reacted: boolean // 현재 연결된 사용자 토큰의 계정이 누른 리액션인지
 }
 
+// ---- Claude / Codex / Slack 통합 활동 HUD ----
+export type ActivitySource = 'claude' | 'codex' | 'slack'
+export type ActivityState = 'running' | 'done' | 'waiting' | 'error'
+
+/** 펫 아래의 세션 HUD에 표시할 한 줄. 로컬 로그 경로는 렌더러로 내보내지 않는다. */
+export interface ActivitySession {
+  id: string
+  source: ActivitySource
+  sessionId: string
+  title: string
+  detail?: string
+  state: ActivityState
+  updatedAt: number
+  contextPercent?: number
+  canOpen: boolean
+}
+
 export type PetState = 'idle' | 'thinking' | 'ready' | 'chatting'
