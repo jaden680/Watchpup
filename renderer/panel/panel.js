@@ -37,6 +37,7 @@ function agentSourceName(source) {
 
 function renderAgentEmpty() {
   if (!agentDetailEl) return
+  delete agentDetailEl.dataset.activityId
   agentDetailEl.innerHTML = '<div class="empty"><div class="empty-mark">⌁</div><p class="empty-title">왼쪽에서 Agent 세션을 골라보세요</p><p class="empty-sub">Codex와 Claude의 진행 상태와 최근 대화를 확인할 수 있습니다.</p></div>'
 }
 

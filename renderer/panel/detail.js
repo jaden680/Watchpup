@@ -5,6 +5,7 @@ import { state, nav, getChat, getActionLog } from './store.js'
 import { STATUS_LABEL, CAT_LABEL, CAT_ORDER, shortText, shortRef, debugRef, fmtMsgTime, authorColor } from './format.js'
 import { copyToClipboard, appendLinkified } from './richtext.js'
 import { playbooks, playbookById } from './playbooks.js'
+import { agentScrollTop } from './agent-scroll.js'
 
 const detailEl = document.getElementById('detail') // #detail — 상세 렌더 대상
 
@@ -140,7 +141,22 @@ function renderDetail(m) {
 }
 
 function renderActivityDetail(activity, targetEl = detailEl) {
+  const previousBody = targetEl.querySelector('.agent-session-body')
+  const previousScroll = previousBody
+    ? {
+        sameActivity: targetEl.dataset.activityId === activity.id,
+        previousTop: previousBody.scrollTop,
+        previousHeight: previousBody.scrollHeight,
+        previousClientHeight: previousBody.clientHeight,
+      }
+    : {
+        sameActivity: false,
+        previousTop: 0,
+        previousHeight: 0,
+        previousClientHeight: 0,
+      }
   targetEl.replaceChildren()
+  targetEl.dataset.activityId = activity.id
   const sourceName = activity.source === 'claude' ? 'Claude' : 'Codex'
   const stateLabels = { running: '진행 중', done: '완료', waiting: '대기', error: '오류' }
 
@@ -219,6 +235,14 @@ function renderActivityDetail(activity, targetEl = detailEl) {
     body.append(summary)
   }
   targetEl.append(body)
+  const restoreScroll = () => {
+    body.scrollTop = agentScrollTop({
+      ...previousScroll,
+      nextHeight: body.scrollHeight,
+    })
+  }
+  restoreScroll()
+  requestAnimationFrame(restoreScroll)
 }
 
 // 좌우 비율(스레드:watchpup) 저장·복원 + 드래그 리사이즈
