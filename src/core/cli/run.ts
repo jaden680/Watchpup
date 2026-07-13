@@ -18,7 +18,7 @@ const appToken = await keychain.get(SecretKeys.slackAppToken)
 const userToken = await keychain.get(SecretKeys.slackUserToken)
 if (!config.mySlackUserId) { console.error('watchpup.config.yaml 의 mySlackUserId 를 설정하세요.'); process.exit(1) }
 
-const mentions = new MentionStore(join(config.dataDir, 'mentions.json'))
+const mentions = new MentionStore(join(config.dataDir, 'mentions'))
 const gw = new WatchpupGateway({
   config, sessions: new SessionStore(join(config.dataDir, 'sessions.json'), config.sessionCacheMax, config.sessionIdleMs),
   keychain, mutex: new KeyedMutex(), semaphore: new Semaphore(config.maxConcurrency),

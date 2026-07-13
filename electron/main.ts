@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   const configStore = new ConfigStore()
   const config = configStore.get()
   bubbleStyle = config.bubbleStyle
-  const mentions = new MentionStore(join(config.dataDir, 'mentions.json'))
+  const mentions = new MentionStore(join(config.dataDir, 'mentions'))
   const sessions = new SessionStore(join(config.dataDir, 'sessions.json'), config.sessionCacheMax, config.sessionIdleMs)
   const state = new StateStore(join(config.dataDir, 'watchpup-state.json'))
   const audit = new AuditStore(join(config.dataDir, 'audit.jsonl'))
