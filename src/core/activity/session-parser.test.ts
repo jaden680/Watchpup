@@ -10,6 +10,10 @@ describe('agent session parser', () => {
 
     const activity = activityFromParsed(state, '세션 HUD 구현', Date.parse('2026-07-13T01:00:03Z'))
     expect(activity).toMatchObject({ source: 'codex', title: '세션 HUD 구현', detail: '완료했습니다', state: 'done', contextPercent: 49 })
+    expect(activity.messages).toEqual([
+      { role: 'user', text: 'HUD 만들어줘', at: Date.parse('2026-07-13T01:00:00Z') },
+      { role: 'assistant', text: '완료했습니다', at: Date.parse('2026-07-13T01:00:02Z') },
+    ])
   })
 
   it('Claude 도구 실행과 end_turn을 구분한다', () => {
@@ -18,7 +22,12 @@ describe('agent session parser', () => {
     state = applyClaudeRecord(state, { timestamp: '2026-07-13T01:00:01Z', type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit' }], stop_reason: 'tool_use' } })
     expect(state.state).toBe('running')
     state = applyClaudeRecord(state, { timestamp: '2026-07-13T01:00:02Z', type: 'assistant', message: { content: [{ type: 'text', text: '구현 완료' }], stop_reason: 'end_turn' } })
-    expect(activityFromParsed(state, undefined, Date.parse('2026-07-13T01:00:03Z'))).toMatchObject({ title: '컴포넌트 구현해줘', detail: '구현 완료', state: 'done' })
+    const activity = activityFromParsed(state, undefined, Date.parse('2026-07-13T01:00:03Z'))
+    expect(activity).toMatchObject({ title: '컴포넌트 구현해줘', detail: '구현 완료', state: 'done' })
+    expect(activity.messages?.map(({ role, text }) => ({ role, text }))).toEqual([
+      { role: 'user', text: '컴포넌트 구현해줘' },
+      { role: 'assistant', text: '구현 완료' },
+    ])
   })
 
   it('오랫동안 새 로그가 없는 실행 상태는 대기로 낮춘다', () => {

@@ -83,7 +83,11 @@ async function main(): Promise<void> {
   }
   let localActivities: ActivitySession[] = []
   const currentActivities = (): ActivitySession[] => mergeActivities(localActivities, slackActivities(mentions.all()))
-  const broadcastActivities = (): void => send(pet, EVT.activitySessions, currentActivities())
+  const broadcastActivities = (): void => {
+    const activities = currentActivities()
+    send(pet, EVT.activitySessions, activities)
+    send(panel, EVT.activitySessions, activities)
+  }
 
   // 창 크기·위치 기억: resize/move 시 디바운스 저장, 생성 시 복원
   const boundsTimers = new Map<string, NodeJS.Timeout>()
@@ -172,6 +176,14 @@ async function main(): Promise<void> {
     if (panel.isVisible()) panel.hide()
     else showPanelHome()
   }
+
+  function openActivityPanel(id: string): void {
+    if (!panel) return
+    if (!panel.isVisible()) panel.show()
+    panel.focus()
+    clearPanelBadge()
+    send(panel, 'activity.focus', id)
+  }
   tray.on('click', () => togglePanel())
 
   // 펫 창 전용 IPC (window.watchpup.togglePanel / setMouseIgnore)
@@ -191,6 +203,7 @@ async function main(): Promise<void> {
   ipcMain.on('activity.detail', (_e, id?: string) => {
     const target = typeof id === 'string' ? activityTarget(id) : null
     if (target?.kind === 'mention') openMentionPanel(target.id)
+    else if (target?.kind === 'external' && id) openActivityPanel(id)
     else showPanelHome()
   })
   ipcMain.on('activity.open', (_e, id: string) => {

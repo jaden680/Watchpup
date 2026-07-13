@@ -102,6 +102,12 @@ export interface ThreadReaction {
 export type ActivitySource = 'claude' | 'codex' | 'slack'
 export type ActivityState = 'running' | 'done' | 'waiting' | 'error'
 
+export interface ActivityMessage {
+  role: 'user' | 'assistant'
+  text: string
+  at: number
+}
+
 /** 펫 아래의 세션 HUD에 표시할 한 줄. 로컬 로그 경로는 렌더러로 내보내지 않는다. */
 export interface ActivitySession {
   id: string
@@ -112,6 +118,7 @@ export interface ActivitySession {
   state: ActivityState
   updatedAt: number
   contextPercent?: number
+  messages?: ActivityMessage[]
   canOpen: boolean
 }
 

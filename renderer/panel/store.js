@@ -4,6 +4,7 @@
 export const state = {
   mentions: new Map(),       // id → Mention (refresh 때 새 Map으로 교체)
   current: null,             // 선택된 mentionId
+  currentActivity: null,     // 선택된 Claude/Codex activityId
   chats: new Map(),          // id → { messages } (mentions 교체와 무관하게 보존)
   pendingEls: new Map(),     // id → 진행 중 채팅 말풍선 el
   actionLogs: new Map(),     // id → { entries } 액션 실행 트랜스크립트

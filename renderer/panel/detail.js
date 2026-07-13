@@ -139,6 +139,88 @@ function renderDetail(m) {
   attachSplitter(panes, left, right, divider)
 }
 
+function renderActivityDetail(activity) {
+  detailEl.replaceChildren()
+  const sourceName = activity.source === 'claude' ? 'Claude' : 'Codex'
+  const stateLabels = { running: '작업 중', done: '완료', waiting: '대기', error: '오류' }
+
+  const head = document.createElement('div')
+  head.className = 'detail-head agent-detail-head'
+  const row = document.createElement('div')
+  row.className = 'head-row'
+  const where = document.createElement('div')
+  where.className = 'where'
+  const source = document.createElement('b')
+  source.textContent = `${sourceName} 로컬 세션`
+  where.append(source)
+  const right = document.createElement('div')
+  right.className = 'head-right'
+  const open = document.createElement('button')
+  open.type = 'button'
+  open.className = 'reanalyze-btn'
+  open.textContent = `↗ ${sourceName}에서 열기`
+  open.disabled = activity.canOpen === false
+  open.addEventListener('click', () => window.watchpup.openActivity(activity.id))
+  const pill = document.createElement('span')
+  pill.className = `status-pill ${activity.state || 'waiting'}`
+  pill.textContent = stateLabels[activity.state] || activity.state || '대기'
+  right.append(open, pill)
+  row.append(where, right)
+  head.append(row)
+
+  const meta = document.createElement('div')
+  meta.className = 'agent-session-meta'
+  const updated = Number(activity.updatedAt)
+  const parts = [Number.isFinite(updated) ? `최근 갱신 ${new Date(updated).toLocaleString('ko-KR')}` : '']
+  if (Number.isFinite(activity.contextPercent)) parts.push(`컨텍스트 ${Math.round(activity.contextPercent)}%`)
+  parts.push(`세션 ${activity.sessionId || ''}`)
+  meta.textContent = parts.filter(Boolean).join(' · ')
+  head.append(meta)
+  detailEl.append(head)
+
+  const body = document.createElement('div')
+  body.className = 'agent-session-body'
+  const title = document.createElement('h1')
+  title.className = 'agent-session-title'
+  title.textContent = activity.title || `${sourceName} 세션`
+  body.append(title)
+
+  const messages = Array.isArray(activity.messages) ? activity.messages : []
+  if (messages.length) {
+    const label = document.createElement('div')
+    label.className = 'agent-session-section-title'
+    label.textContent = `최근 대화 ${messages.length}개`
+    body.append(label)
+    const transcript = document.createElement('div')
+    transcript.className = 'agent-session-transcript'
+    for (const message of messages) {
+      if (!message || typeof message.text !== 'string' || !message.text) continue
+      const card = document.createElement('article')
+      card.className = `agent-session-message ${message.role === 'user' ? 'user' : 'assistant'}`
+      const messageHead = document.createElement('div')
+      messageHead.className = 'agent-session-message-head'
+      const role = document.createElement('b')
+      role.textContent = message.role === 'user' ? '사용자' : sourceName
+      const at = document.createElement('span')
+      at.textContent = Number.isFinite(message.at)
+        ? new Date(message.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+        : ''
+      messageHead.append(role, at)
+      const content = document.createElement('pre')
+      content.textContent = message.text
+      card.append(messageHead, content)
+      transcript.append(card)
+    }
+    body.append(transcript)
+  } else {
+    const summary = document.createElement('pre')
+    summary.className = 'agent-session-summary'
+    summary.textContent = activity.detail || '아직 표시할 대화 내용이 없습니다.'
+    body.append(summary)
+  }
+  detailEl.append(body)
+}
+
 // 좌우 비율(스레드:watchpup) 저장·복원 + 드래그 리사이즈
 const SPLIT_KEY = 'watchpup.splitRatio'
 function getSplitRatio() {
@@ -970,6 +1052,6 @@ window.watchpup.onActionDone(({ mentionId, playbookId, text, error }) => {
 })
 
 // 다른 모듈이 순환 import 없이 쓰도록 등록
-Object.assign(nav, { renderDetail, runAction })
+Object.assign(nav, { renderDetail, renderActivityDetail, runAction })
 
-export { renderDetail, runAction }
+export { renderActivityDetail, renderDetail, runAction }

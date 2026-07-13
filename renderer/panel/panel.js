@@ -7,7 +7,7 @@ import { playbooks, playbookById } from './playbooks.js'
 import { loadSettings, loadPlaybooks, showSset, setOnPlaybooksChanged } from './settings.js'
 import { state, getChat, getActionLog, sortedMentions, nav } from './store.js'
 import { renderDigest, renderTodosView } from './views.js'
-import { renderDetail } from './detail.js'
+import { renderActivityDetail, renderDetail } from './detail.js'
 
 // playbook 변경 시 열린 상세의 액션 버튼 갱신(settings→panel 결합을 훅으로만)
 setOnPlaybooksChanged(() => {
@@ -153,6 +153,7 @@ function renderList() {
 }
 
 function select(id) {
+  state.currentActivity = null
   state.current = id
   const m = state.mentions.get(id)
   if (m && !m.readAt) {
@@ -285,10 +286,33 @@ function ensureMentionsTab() {
 if (window.watchpup.onPanelShown) {
   window.watchpup.onPanelShown(() => ensureMentionsTab())
 }
+// HUD의 Claude/Codex 행 클릭 → Watchpup 내부 세션 상세
+if (window.watchpup.onActivityFocus) {
+  window.watchpup.onActivityFocus((id) => {
+    if (typeof id !== 'string' || !id) return
+    ensureMentionsTab()
+    window.watchpup.activityList().then((rows) => {
+      const activity = Array.isArray(rows) ? rows.find((row) => row?.id === id) : null
+      if (!activity) return
+      state.current = null
+      state.currentActivity = id
+      renderList()
+      renderActivityDetail(activity)
+    }).catch(() => {})
+  })
+}
+if (window.watchpup.onActivitySessions) {
+  window.watchpup.onActivitySessions((rows) => {
+    if (!state.currentActivity || !Array.isArray(rows)) return
+    const activity = rows.find((row) => row?.id === state.currentActivity)
+    if (activity) renderActivityDetail(activity)
+  })
+}
 // 말풍선 클릭으로 특정 스레드 열기
 if (window.watchpup.onMentionFocus) {
   window.watchpup.onMentionFocus((id) => {
     if (typeof id !== 'string' || !id) return
+    state.currentActivity = null
     ensureMentionsTab()
     // 목록에 없을 수 있으니 최신 목록을 먼저 반영 후 선택
     refresh().then(() => {

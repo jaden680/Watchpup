@@ -1,13 +1,15 @@
-import type { ActivitySession, ActivitySource, ActivityState } from '../types.js'
+import type { ActivityMessage, ActivitySession, ActivitySource, ActivityState } from '../types.js'
 
 const TITLE_MAX = 96
-const DETAIL_MAX = 180
+const DETAIL_MAX = 6_000
+const MESSAGE_LIMIT = 24
 
 export interface ParsedSessionState {
   source: Exclude<ActivitySource, 'slack'>
   sessionId: string
   title: string
   detail: string
+  messages: ActivityMessage[]
   state: ActivityState
   updatedAt: number
   contextPercent?: number
@@ -54,7 +56,7 @@ function recordTime(record: JsonObject, fallback: number): number {
 }
 
 function assistantText(content: unknown): string {
-  if (typeof content === 'string') return compactText(content, DETAIL_MAX)
+  if (typeof content === 'string') return readableText(content)
   if (!Array.isArray(content)) return ''
   const joined = content
     .map((item) => {
@@ -62,8 +64,28 @@ function assistantText(content: unknown): string {
       return row && row.type === 'text' && typeof row.text === 'string' ? row.text : ''
     })
     .filter(Boolean)
-    .join(' ')
-  return compactText(joined, DETAIL_MAX)
+    .join('\n\n')
+  return readableText(joined)
+}
+
+function readableText(value: unknown): string {
+  const raw = typeof value === 'string' ? value : text(value)
+  const normalized = raw.replace(/\r\n/g, '\n').trim()
+  if (normalized.length <= DETAIL_MAX) return normalized
+  return `${normalized.slice(0, DETAIL_MAX - 1).trimEnd()}…`
+}
+
+function appendMessage(
+  messages: ActivityMessage[],
+  role: ActivityMessage['role'],
+  value: unknown,
+  at: number,
+): ActivityMessage[] {
+  const body = role === 'assistant' ? assistantText(value) : readableText(value)
+  if (!body) return messages
+  const previous = messages.at(-1)
+  if (previous?.role === role && previous.text === body) return messages
+  return [...messages, { role, text: body, at }].slice(-MESSAGE_LIMIT)
 }
 
 export function newParsedSession(
@@ -76,6 +98,7 @@ export function newParsedSession(
     sessionId,
     title: '',
     detail: '',
+    messages: [],
     state: 'waiting',
     updatedAt,
     headless: false,
@@ -110,17 +133,20 @@ export function applyCodexRecord(
     if (event === 'user_message') {
       const title = compactText(payload.message)
       if (title) next.title = title
+      next.messages = appendMessage(next.messages, 'user', payload.message, at)
       next.state = 'running'
     } else if (event === 'task_started' || event === 'agent_reasoning' || event === 'agent_message') {
       next.state = 'running'
       if (event === 'agent_message') {
-        const detail = compactText(payload.message, DETAIL_MAX)
+        const detail = readableText(payload.message)
         if (detail) next.detail = detail
+        next.messages = appendMessage(next.messages, 'assistant', payload.message, at)
       }
     } else if (event === 'task_complete') {
       next.state = 'done'
-      const detail = compactText(payload.last_agent_message, DETAIL_MAX)
+      const detail = readableText(payload.last_agent_message)
       if (detail) next.detail = detail
+      next.messages = appendMessage(next.messages, 'assistant', payload.last_agent_message, at)
     } else if (event === 'turn_aborted') {
       next.state = 'error'
     } else if (event === 'token_count') {
@@ -143,6 +169,7 @@ export function applyCodexRecord(
     if (subtype === 'message' && payload.role === 'assistant') {
       const detail = assistantText(payload.content)
       if (detail) next.detail = detail
+      next.messages = appendMessage(next.messages, 'assistant', payload.content, at)
     }
   }
   return next
@@ -176,6 +203,7 @@ export function applyClaudeRecord(
     const message = object(record.message)
     const title = compactText(message?.content)
     if (title) next.title = title
+    next.messages = appendMessage(next.messages, 'user', message?.content, at)
     next.state = 'running'
     return next
   }
@@ -184,6 +212,7 @@ export function applyClaudeRecord(
     if (!message) return next
     const detail = assistantText(message.content)
     if (detail) next.detail = detail
+    next.messages = appendMessage(next.messages, 'assistant', message.content, at)
     const stopReason = typeof message.stop_reason === 'string' ? message.stop_reason : ''
     next.state = ['end_turn', 'stop_sequence', 'max_tokens'].includes(stopReason) ? 'done' : 'running'
     return next
@@ -209,6 +238,7 @@ export function activityFromParsed(
     state,
     updatedAt: parsed.updatedAt,
     contextPercent: parsed.contextPercent,
+    messages: parsed.messages,
     canOpen: Boolean(parsed.sessionId),
   }
 }

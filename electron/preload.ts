@@ -11,6 +11,7 @@ function sub(channel: string, cb: (payload: unknown) => void): () => void {
 contextBridge.exposeInMainWorld('watchpup', {
   activityList: () => ipcRenderer.invoke(CMD.activityList),
   onActivitySessions: (cb: (sessions: unknown) => void) => sub(EVT.activitySessions, cb),
+  onActivityFocus: (cb: (id: unknown) => void) => sub('activity.focus', cb),
   openActivity: (id: string) => ipcRenderer.send('activity.open', id),
   openActivityDetail: (id?: string) => ipcRenderer.send('activity.detail', id),
   mentionsList: () => ipcRenderer.invoke(CMD.mentionsList),

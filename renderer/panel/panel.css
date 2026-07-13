@@ -483,6 +483,78 @@ html, body {
 .status-pill.ready::before { background: var(--st-ready); }
 .status-pill.replied { color: var(--st-replied); }
 .status-pill.replied::before { background: var(--st-replied); }
+.status-pill.running { color: var(--st-analyzing); }
+.status-pill.running::before { background: var(--st-analyzing); }
+.status-pill.done { color: var(--st-ready); }
+.status-pill.done::before { background: var(--st-ready); }
+.status-pill.error { color: #e46a6a; }
+.status-pill.error::before { background: #e46a6a; }
+
+/* Claude/Codex 로컬 세션 상세 */
+.agent-session-meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-session-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding-right: var(--sp-1);
+}
+.agent-session-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: 20px;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+}
+.agent-session-section-title {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.agent-session-transcript { display: flex; flex-direction: column; gap: var(--sp-3); }
+.agent-session-message {
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg-elev);
+}
+.agent-session-message.user { border-left: 3px solid var(--accent); }
+.agent-session-message.assistant { border-left: 3px solid var(--st-ready); }
+.agent-session-message-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-2);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.agent-session-message pre,
+.agent-session-summary {
+  margin: 0;
+  color: var(--fg);
+  font: 12.5px/1.6 var(--font-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-session-summary {
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg-elev);
+}
 
 /* 참조코드(#abc123)·다시분석 = 작은 유틸 칩/버튼 */
 .mref {
