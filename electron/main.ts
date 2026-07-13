@@ -18,7 +18,7 @@ import { generateQuips } from '../src/core/watchpup/quips.js'
 import { parseSkillMd } from '../src/core/watchpup/skill-import.js'
 import type { Mention, PetState, AgentStreamEvent } from '../src/core/types.js'
 import { CMD, EVT } from './ipc.js'
-import type { ChatSendArgs, TodoToggleArgs, SettingsPatch, TokensPatch, TokensStatus, Playbook, ActionRunArgs } from './ipc.js'
+import type { ChatSendArgs, TodoToggleArgs, SettingsPatch, TokensPatch, TokensStatus, Playbook, ActionRunArgs, ReactionSetArgs } from './ipc.js'
 import { createPetWindow, createPanelWindow } from './windows.js'
 import { petImagesFromDir, listCodexPets as listCodexPetsAt, resolveCodexPet } from './pets.js'
 import { readGlobalMcpCandidates } from './mcp-import.js'
@@ -267,7 +267,9 @@ async function main(): Promise<void> {
   })
   ipcMain.handle('pet.codex.get', () => resolveCodexPet(configStore.get().petCodexDir))
   // 스레드 대화 즉석 조회(예전 멘션은 thread가 없을 수 있음)
-  ipcMain.handle('thread.get', (_e, id: string) => (gateway ? gateway.getThread(id) : Promise.resolve([])))
+  ipcMain.handle('thread.get', (_e, id: string, refresh = false) =>
+    gateway ? gateway.getThread(id, !!refresh) : Promise.resolve([]),
+  )
 
   // 코드 레포: 목록·추가(폴더 선택)·삭제 — 코드 원인 조사에 사용(claude --add-dir)
   ipcMain.handle('repos.list', () => configStore.get().repos)
@@ -409,6 +411,7 @@ async function main(): Promise<void> {
   const botToken = await keychain.get(SecretKeys.slackBotToken)
   const appToken = await keychain.get(SecretKeys.slackAppToken)
   const userToken = await keychain.get(SecretKeys.slackUserToken)
+  if (userToken) gateway.attachUserToken(userToken)
   if (config.enableBot && botToken && appToken) {
     try {
       gateway.attachSocket(botToken, appToken)
@@ -430,6 +433,9 @@ async function main(): Promise<void> {
     gateway?.toggleTodo(a.mentionId, a.index)
   })
   ipcMain.handle(CMD.replyApprove, (_e, id: string) => (gateway ? gateway.approveReply(id) : Promise.resolve({ ts: null })))
+  ipcMain.handle(CMD.reactionSet, (_e, a: ReactionSetArgs) =>
+    gateway ? gateway.setReaction(a.mentionId, a.messageTs, a.name, a.active) : Promise.resolve({ thread: [] }),
+  )
   ipcMain.handle('dev.run', (_e, a: { mentionId: string; repoPaths: string[]; extraContext: string }) => {
     if (!gateway) return Promise.resolve()
     send(pet, EVT.chatBubble, { type: 'start' })

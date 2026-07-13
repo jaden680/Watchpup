@@ -181,6 +181,77 @@ function attachSplitter(container, left, right, divider) {
 
 // 평문에서 URL(클릭) · @멘션 · #채널을 색으로 강조. 안전: 노드 조립(innerHTML 미사용).
 
+const REACTION_CHOICES = [
+  ['eyes', '👀'],
+  ['white_check_mark', '✅'],
+  ['+1', '👍'],
+  ['heart', '❤️'],
+  ['pray', '🙏'],
+  ['tada', '🎉'],
+]
+const REACTION_EMOJI = new Map(REACTION_CHOICES)
+
+function reactionLabel(name) {
+  return REACTION_EMOJI.get(name) || `:${name}:`
+}
+
+async function changeReaction(mention, msg, name, active, button, errorEl) {
+  if (!msg.ts || button.disabled) return
+  button.disabled = true
+  errorEl.textContent = ''
+  try {
+    const result = await window.watchpup.reactionSet(mention.id, msg.ts, name, active)
+    if (Array.isArray(result?.thread)) mention.thread = result.thread
+    if (state.current === mention.id) renderDetail(mention)
+  } catch (error) {
+    console.error('reactionSet 실패', error)
+    button.disabled = false
+    errorEl.textContent = '리액션 권한을 확인해 주세요'
+  }
+}
+
+function renderReactions(mention, msg) {
+  if (!msg.ts) return null
+  const wrap = document.createElement('div')
+  wrap.className = 'treactions'
+  const error = document.createElement('span')
+  error.className = 'treaction-error'
+
+  for (const reaction of msg.reactions || []) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'treaction' + (reaction.reacted ? ' active' : '')
+    button.textContent = `${reactionLabel(reaction.name)} ${reaction.count}`
+    button.title = reaction.reacted ? '내 리액션 취소' : '리액션 추가'
+    button.addEventListener('click', () => {
+      changeReaction(mention, msg, reaction.name, !reaction.reacted, button, error)
+    })
+    wrap.appendChild(button)
+  }
+
+  const add = document.createElement('details')
+  add.className = 'treaction-add'
+  const summary = document.createElement('summary')
+  summary.textContent = '+'
+  summary.title = '리액션 추가'
+  const picker = document.createElement('div')
+  picker.className = 'treaction-picker'
+  for (const [name, emoji] of REACTION_CHOICES) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = emoji
+    button.title = `:${name}:`
+    button.addEventListener('click', () => {
+      add.open = false
+      changeReaction(mention, msg, name, true, button, error)
+    })
+    picker.appendChild(button)
+  }
+  add.append(summary, picker)
+  wrap.append(add, error)
+  return wrap
+}
+
 function renderThreadPane(m) {
   const pane = document.createElement('div')
   pane.className = 'thread-pane'
@@ -206,6 +277,17 @@ function renderThreadPane(m) {
       })
     return pane
   }
+  // 저장된 과거 스레드도 상세 화면을 처음 열 때 한 번 갱신해 리액션을 채운다.
+  if (!m.reactionsLoaded) {
+    m.reactionsLoaded = true
+    window.watchpup
+      .threadGet(m.id, true)
+      .then((msgs) => {
+        if (Array.isArray(msgs)) m.thread = msgs
+        if (state.current === m.id) renderDetail(m)
+      })
+      .catch((error) => console.error('리액션 포함 스레드 새로고침 실패', error))
+  }
   for (const msg of thread) {
     const row = document.createElement('div')
     row.className = 'tmsg' + (msg.mine ? ' mine' : '')
@@ -229,6 +311,8 @@ function renderThreadPane(m) {
     if (col) text.style.borderLeftColor = col
     appendLinkified(text, msg.text || '')
     row.append(author, text)
+    const reactions = renderReactions(m, msg)
+    if (reactions) row.appendChild(reactions)
     pane.appendChild(row)
   }
   // 새 창/재렌더 시 가장 최근 메시지(맨 아래)로 스크롤

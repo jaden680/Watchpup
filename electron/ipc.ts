@@ -14,6 +14,7 @@ export const CMD = {
   playbookUpsert: 'playbook.upsert',
   playbookDelete: 'playbook.delete',
   actionRun: 'action.run',
+  reactionSet: 'reaction.set',
 } as const
 
 export const EVT = {
@@ -40,6 +41,13 @@ export interface ChatSendArgs {
 export interface TodoToggleArgs {
   mentionId: string
   index: number
+}
+
+export interface ReactionSetArgs {
+  mentionId: string
+  messageTs: string
+  name: string
+  active: boolean
 }
 
 /** 액션(워크플로우) 정의 — src/core/config/schema.ts playbookSchema와 동일 형태 */

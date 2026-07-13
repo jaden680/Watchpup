@@ -89,6 +89,13 @@ export interface ThreadMsg {
   text: string
   mine: boolean  // 내가 쓴 메시지인지
   ts?: string    // Slack 메시지 ts(epoch 초.마이크로) — 시간 표시용
+  reactions?: ThreadReaction[]
+}
+
+export interface ThreadReaction {
+  name: string
+  count: number
+  reacted: boolean // 현재 연결된 사용자 토큰의 계정이 누른 리액션인지
 }
 
 export type PetState = 'idle' | 'thinking' | 'ready' | 'chatting'

@@ -18,6 +18,8 @@ oauth_config:
   scopes:
     user:
       - search:read          # 전 채널 멘션 검색(User Token)
+      - reactions:read       # 메시지 리액션 조회
+      - reactions:write      # 내 계정으로 리액션 추가·취소
     bot:
       - channels:history
       - groups:history

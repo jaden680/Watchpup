@@ -51,7 +51,9 @@ contextBridge.exposeInMainWorld('watchpup', {
   codexPickDir: () => ipcRenderer.invoke('codex.pickDir'),
   codexUse: (dir: string) => ipcRenderer.invoke('codex.use', dir),
   petCodex: () => ipcRenderer.invoke('pet.codex.get'),
-  threadGet: (id: string) => ipcRenderer.invoke('thread.get', id),
+  threadGet: (id: string, refresh = false) => ipcRenderer.invoke('thread.get', id, refresh),
+  reactionSet: (mentionId: string, messageTs: string, name: string, active: boolean) =>
+    ipcRenderer.invoke(CMD.reactionSet, { mentionId, messageTs, name, active }),
   groupsList: () => ipcRenderer.invoke('groups.list'),
   groupsResearch: () => ipcRenderer.invoke('groups.research'),
   groupsRemove: (id: string) => ipcRenderer.invoke('groups.remove', id),

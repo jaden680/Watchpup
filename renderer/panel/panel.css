@@ -551,6 +551,63 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   border-left: 2px solid var(--border-strong);
 }
 .tmsg.mine .ttext { border-left: none; border-right: 2px solid var(--accent); padding-left: 0; padding-right: var(--sp-2); text-align: left; }
+.treactions { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; position: relative; }
+.tmsg.mine .treactions { justify-content: flex-end; }
+.treaction,
+.treaction-add > summary,
+.treaction-picker button {
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font: 500 11px/1 var(--font-brand);
+  cursor: pointer;
+}
+.treaction {
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+.treaction:hover,
+.treaction.active { color: var(--accent-strong); border-color: var(--accent); background: var(--accent-soft); }
+.treaction:disabled,
+.treaction-picker button:disabled { opacity: 0.5; cursor: wait; }
+.treaction-add { position: relative; }
+.treaction-add > summary {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  list-style: none;
+}
+.treaction-add > summary::-webkit-details-marker { display: none; }
+.treaction-add > summary:hover { color: var(--fg); border-color: var(--border-strong); }
+.treaction-picker {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  bottom: 30px;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-2);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+}
+.tmsg.mine .treaction-picker { left: auto; right: 0; }
+.treaction-picker button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 7px;
+  font-size: 16px;
+}
+.treaction-picker button:hover { background: var(--bg-sunken); border-color: var(--border-strong); }
+.treaction-error { color: #d05b5b; font-size: 10.5px; }
 
 /* ---------- 섹션 (라벨 + 본문, 박스 없음) ---------- */
 .section { display: flex; flex-direction: column; gap: var(--sp-2); }

@@ -95,6 +95,11 @@ export class WatchpupGateway extends EventEmitter {
     return this.userClient ?? this.botClient
   }
 
+  /** 쓰기 작업(답장·리액션)을 사용자 계정으로 실행할 수 있도록 User Token 클라이언트를 준비한다. */
+  attachUserToken(userToken: string): void {
+    this.userClient = new WebClient(userToken)
+  }
+
   /** 봇(소켓) 소스 부착 — 봇이 초대된 채널의 @나 멘션/스레드 후속을 즉시 감지 */
   attachSocket(botToken: string, appToken: string): void {
     this.app = new App({ token: botToken, appToken, socketMode: true, logLevel: LogLevel.WARN })
@@ -119,22 +124,23 @@ export class WatchpupGateway extends EventEmitter {
 
   /** 내 계정(User Token) 검색 폴링 소스 부착 — 전 채널의 @나 멘션 (+ 스레드 후속, 유저그룹 검색) */
   attachUserSearch(userToken: string, myUserId: string, intervalSec: number): void {
-    this.userClient = new WebClient(userToken)
+    if (!this.userClient) this.attachUserToken(userToken)
+    const client = this.userClient!
     // groupHandles는 참조로 넘겨 resolveMyGroups()가 나중에(비동기) 채워도 다음 폴링부터 반영되게 한다.
-    this.poller = new SearchPoller(this.userClient, myUserId, intervalSec, (raw) => {
-      void this.handleMention(raw, this.userClient!)
+    this.poller = new SearchPoller(client, myUserId, intervalSec, (raw) => {
+      void this.handleMention(raw, client)
     }, this.groupHandles)
     this.applyGroupsFromConfig()
 
     if (this.cfg().followThreads) {
       this.followPoller = new ThreadFollowPoller(
-        this.userClient,
+        client,
         () => this.deps.state.trackedThreads(),
         (channel, threadTs) => this.deps.state.getThreadCursor(threadKey(channel, threadTs)),
         (channel, threadTs, ts) => this.deps.state.setThreadCursor(threadKey(channel, threadTs), ts),
         myUserId,
         intervalSec,
-        (raw) => { void this.handleMention(raw, this.userClient!) },
+        (raw) => { void this.handleMention(raw, client) },
       )
     }
   }
@@ -256,6 +262,46 @@ export class WatchpupGateway extends EventEmitter {
       text, write: true, approved: true, outcome: 'ok',
     })
     return { ts: (res.ts as string) ?? null }
+  }
+
+  /** 스레드 메시지 리액션 추가/취소 — 사용자 토큰으로 실행해 내 Slack 계정의 반응으로 남긴다. */
+  async setReaction(
+    mentionId: string,
+    messageTs: string,
+    name: string,
+    active: boolean,
+  ): Promise<{ thread: ThreadMsg[] }> {
+    const m = this.deps.mentions.get(mentionId)
+    if (!m || !messageTs || !/^[a-z0-9_+-]{1,100}$/i.test(name)) return { thread: m?.thread ?? [] }
+    if (!this.userClient) throw new Error('리액션에는 reactions:write 권한이 있는 User Token이 필요합니다.')
+
+    try {
+      if (active) await this.userClient.reactions.add({ channel: m.channel, timestamp: messageTs, name })
+      else await this.userClient.reactions.remove({ channel: m.channel, timestamp: messageTs, name })
+    } catch (err) {
+      const code = (err as { data?: { error?: string } })?.data?.error
+      const alreadyInDesiredState = (active && code === 'already_reacted') || (!active && code === 'no_reaction')
+      if (!alreadyInDesiredState) throw err
+    }
+
+    const message = m.thread?.find((item) => item.ts === messageTs)
+    if (message) {
+      const reactions = message.reactions ?? (message.reactions = [])
+      const existing = reactions.find((reaction) => reaction.name === name)
+      if (existing) {
+        if (existing.reacted !== active) existing.count += active ? 1 : -1
+        existing.reacted = active
+        if (existing.count <= 0) message.reactions = reactions.filter((reaction) => reaction !== existing)
+      } else if (active) {
+        reactions.push({ name, count: 1, reacted: true })
+      }
+    }
+    this.deps.mentions.set(mentionId, m)
+    this.deps.audit.record({
+      ts: Date.now(), requestId: m.id, channel: m.channel, kind: active ? 'reaction.add' : 'reaction.remove',
+      text: `:${name}:`, write: true, approved: true, outcome: 'ok',
+    })
+    return { thread: m.thread ?? [] }
   }
 
   /** 답장 초안을 요청 톤으로 리라이트 → 초안 갱신 후 새 텍스트 반환 */
@@ -531,11 +577,11 @@ export class WatchpupGateway extends EventEmitter {
   }
 
   /** 멘션의 스레드 대화를 (없으면) 즉석 조회해 캐시 — 예전에 저장돼 thread가 없는 멘션 대비 */
-  async getThread(mentionId: string): Promise<ThreadMsg[]> {
+  async getThread(mentionId: string, refresh = false): Promise<ThreadMsg[]> {
     const m = this.deps.mentions.get(mentionId)
     const client = this.replyClient()
     if (!m || !client) return m?.thread ?? []
-    if (m.thread && m.thread.length) return m.thread
+    if (!refresh && m.thread && m.thread.length) return m.thread
     const thread = await fetchThreadMessages(client, m.channel, m.threadTs, this.cfg().mySlackUserId, { limit: this.cfg().threadFetchLimit })
     m.thread = thread
     this.deps.mentions.set(mentionId, m)
