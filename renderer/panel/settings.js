@@ -202,7 +202,12 @@ async function renderIntegrations() {
   const nD = document.getElementById('notion-disconnect')
   if (nD) nD.classList.toggle('hidden', !st.notion.connected)
   const jS = document.getElementById('integ-jira-status')
-  if (jS) { jS.textContent = st.jira.connected ? '● 연결됨' : '○ 미연결'; jS.className = 'integ-status ' + (st.jira.connected ? 'on' : '') }
+  if (jS) {
+    const needsReconnect = st.jira.connected && st.jira.authenticated === false
+    jS.textContent = needsReconnect ? '● 재연결 필요' : st.jira.connected ? '● 연결됨' : '○ 미연결'
+    jS.className = 'integ-status ' + (needsReconnect ? 'warn' : st.jira.connected ? 'on' : '')
+    jS.title = needsReconnect ? (st.jira.error || 'Jira API Token을 다시 입력해주세요.') : ''
+  }
   const jD = document.getElementById('jira-disconnect')
   if (jD) jD.classList.toggle('hidden', !st.jira.connected)
   if (st.jira.site) document.getElementById('jira-site').value = st.jira.site
@@ -234,13 +239,14 @@ document.getElementById('jira-connect')?.addEventListener('click', async () => {
   const token = document.getElementById('jira-token').value.trim()
   const status = await window.watchpup.integrationStatus()
   if (!site || !email) { msg.textContent = '사이트·이메일 필수'; return }
-  if (!token && !status.jira.connected) { msg.textContent = 'API 토큰을 입력하세요'; return }
+  if (!token && (!status.jira.connected || status.jira.authenticated === false)) { msg.textContent = '새 API 토큰을 입력하세요'; return }
   msg.textContent = '연결 중…'
   try {
     await window.watchpup.connectJira({ site, email, token })
     document.getElementById('jira-token').value = ''
-    msg.textContent = '연결됨 (다음 분석부터 적용)'
     await renderIntegrations(); await renderMcpList()
+    const verified = await window.watchpup.integrationStatus()
+    msg.textContent = verified.jira.authenticated ? '연결됨' : (verified.jira.error || '인증 확인 실패')
   } catch (e) { msg.textContent = '실패: ' + (e?.message || e) }
 })
 document.getElementById('jira-disconnect')?.addEventListener('click', async () => {

@@ -680,7 +680,12 @@ async function main(): Promise<void> {
     return readGlobalMcpCandidates().map((c) => ({ ...c, already: existing.has(c.id) }))
   })
   // 간편 연동 (노션·지라) — 토큰 Keychain 저장 + MCP 서버 자동 구성
-  ipcMain.handle('integration.status', () => integrationStatus(configStore))
+  ipcMain.handle('integration.status', async () => {
+    const status = await integrationStatus(configStore)
+    if (!status.jira.connected) return status
+    const auth = await workStatus.jiraConnectionStatus()
+    return { ...status, jira: { ...status.jira, ...auth } }
+  })
   ipcMain.handle('integration.connectNotion', async (_e, token: string) => {
     deps.config = await connectNotion(configStore, keychain, token || '')
   })

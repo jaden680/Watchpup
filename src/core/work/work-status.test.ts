@@ -19,6 +19,7 @@ describe('WorkStatusService', () => {
     expect(status).toMatchObject({ kind: 'jira', title: 'Fix issue', status: '할 일' })
     expect(status.actions).toEqual([{ id: 'jira.transition:31', label: '진행 중' }])
     expect(fetcher.mock.calls[0][1]?.headers).toMatchObject({ Authorization: expect.stringMatching(/^Basic /) })
+    expect(await service.jiraConnectionStatus()).toEqual({ authenticated: true })
   })
 
   it('never sends Jira credentials to a different host', async () => {

@@ -12,7 +12,7 @@ export const JIRA_KEY = 'MCP_JIRA_TOKEN'
 
 export interface IntegrationStatus {
   notion: { connected: boolean }
-  jira: { connected: boolean; site: string; email: string }
+  jira: { connected: boolean; site: string; email: string; authenticated?: boolean; error?: string }
 }
 
 function serverById(config: WatchpupConfig, id: string) {

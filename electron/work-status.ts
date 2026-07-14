@@ -61,6 +61,17 @@ export class WorkStatusService {
     this.jiraAuthPromise = null
   }
 
+  async jiraConnectionStatus(): Promise<{ authenticated: boolean; error?: string }> {
+    const configured = configuredJira(this.configStore)
+    if (!configured) return { authenticated: false, error: 'Jira 연결 정보가 없습니다.' }
+    try {
+      await this.ensureJiraAuthenticated(`https://${configured.host}`)
+      return { authenticated: true }
+    } catch (error) {
+      return { authenticated: false, error: error instanceof Error ? error.message : 'Jira 인증에 실패했습니다.' }
+    }
+  }
+
   async status(url: string): Promise<WorkLinkStatus> {
     const jira = parseJiraLink(url)
     if (jira) return this.jiraStatus(jira.site, jira.key)
