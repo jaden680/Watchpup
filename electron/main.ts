@@ -16,23 +16,34 @@ import { pickIdleLine } from '../src/core/presentation/idle.js'
 import { WatchpupGateway } from '../src/core/slack/gateway.js'
 import { generateQuips } from '../src/core/watchpup/quips.js'
 import { parseSkillMd } from '../src/core/watchpup/skill-import.js'
-import type { Mention, PetState, AgentStreamEvent } from '../src/core/types.js'
+import type { Mention, PetState, AgentStreamEvent, ActivitySession } from '../src/core/types.js'
 import { CMD, EVT } from './ipc.js'
-import type { ChatSendArgs, TodoToggleArgs, SettingsPatch, TokensPatch, TokensStatus, Playbook, ActionRunArgs } from './ipc.js'
+import type { ChatSendArgs, TodoToggleArgs, SettingsPatch, TokensPatch, TokensStatus, Playbook, ActionRunArgs, ReactionSetArgs } from './ipc.js'
 import { createPetWindow, createPanelWindow } from './windows.js'
 import { petImagesFromDir, listCodexPets as listCodexPetsAt, resolveCodexPet } from './pets.js'
 import { readGlobalMcpCandidates } from './mcp-import.js'
 import { addGithubRepo } from './repos-github.js'
 import { integrationStatus, connectNotion, connectJira, disconnectIntegration } from './integrations.js'
+import { localRelaunchArgs } from '../src/core/watchpup/relaunch.js'
+import { LocalAgentPoller, type ActivityHistoryRange } from '../src/core/activity/session-poller.js'
+import { mergeActivities, slackActivities } from '../src/core/activity/merge.js'
+import { activityTarget } from './activity-link.js'
+import { resolveWatchpupConfigPath } from '../src/core/config/path.js'
 
 let pet: BrowserWindow | null = null
 let panel: BrowserWindow | null = null
 let gateway: WatchpupGateway | null = null
+let agentPoller: LocalAgentPoller | null = null
 let unread = 0
 let lastActivity = Date.now()
+let isQuitting = false
 
 function send(win: BrowserWindow | null, channel: string, payload: unknown): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+}
+
+function activePanel(): BrowserWindow | null {
+  return panel && !panel.isDestroyed() ? panel : null
 }
 
 // 멘션/채팅/액션 이벤트는 (단일 마스터-디테일) 패널로 보낸다.
@@ -56,7 +67,7 @@ function sendPetState(s: PetState): void {
 
 async function main(): Promise<void> {
   // 1) deps 구성 (src/core/cli/run.ts와 동일 방식)
-  const configStore = new ConfigStore()
+  const configStore = new ConfigStore(resolveWatchpupConfigPath())
   const config = configStore.get()
   bubbleStyle = config.bubbleStyle
   const mentions = new MentionStore(join(config.dataDir, 'mentions'))
@@ -74,6 +85,20 @@ async function main(): Promise<void> {
     audit,
     mentions,
     lessons,
+  }
+
+  // 렌더러가 창 로드 직후 요청하는 초기 설정 핸들러는 창을 만들기 전에 등록한다.
+  // 늦게 등록하면 첫 요청이 실패한 뒤 기본 UI 값(100%)이 그대로 남을 수 있다.
+  ipcMain.handle(CMD.settingsGet, () => configStore.get())
+  ipcMain.handle('pet.images.get', () => petImagesFromDir(configStore.get().petImageDir))
+  ipcMain.handle('pet.codex.get', () => resolveCodexPet(configStore.get().petCodexDir))
+
+  let localActivities: ActivitySession[] = []
+  const currentActivities = (): ActivitySession[] => mergeActivities(localActivities, slackActivities(mentions.all()))
+  const broadcastActivities = (): void => {
+    const activities = currentActivities()
+    send(pet, EVT.activitySessions, activities)
+    send(panel, EVT.activitySessions, activities)
   }
 
   // 창 크기·위치 기억: resize/move 시 디바운스 저장, 생성 시 복원
@@ -98,6 +123,11 @@ async function main(): Promise<void> {
   // 2) 창 + 트레이 생성
   pet = createPetWindow(config.petAlwaysOnTop)
   panel = createPanelWindow(state.getWindowBounds('panel'))
+  panel.on('close', (event) => {
+    if (isQuitting) return
+    event.preventDefault()
+    activePanel()?.hide()
+  })
 
 
   rememberBounds(panel, 'panel')
@@ -135,44 +165,83 @@ async function main(): Promise<void> {
     }
   })
 
-  // 트레이/펫 클릭 시 blur가 먼저 발생해 패널을 숨기고, 뒤이어 togglePanel이 실행되면
   // 마스터-디테일 패널은 옆에 두고 참조하는 창 → 포커스 잃어도 자동으로 닫지 않는다.
-  // 닫기는 ESC / X 버튼 / 펫(트레이) 토글로만.
+  // 닫기는 ESC / X 버튼 / 트레이 토글로만. 펫 더블클릭은 열기만 한다.
 
   const tray = new Tray(nativeImage.createEmpty())
   tray.setTitle('🐾')
 
+  function clearPanelBadge(): void {
+    unread = 0
+    state.setBadge(0)
+    send(pet, EVT.pet, 'idle')
+    send(pet, EVT.badge, 0)
+    if (process.platform === 'darwin') app.dock?.setBadge('')
+  }
+
+  function showPanelHome(): void {
+    const win = activePanel()
+    if (!win) return
+    if (!win.isVisible()) win.show()
+    win.focus()
+    send(win, 'panel.shown', {}) // 열 때 항상 멘션 목록부터(직전 설정 탭 잔상 방지)
+    clearPanelBadge()
+  }
+
   function togglePanel(): void {
-    if (!panel) return
-    if (panel.isVisible()) {
-      panel.hide()
-    } else {
-      panel.show()
-      panel.focus()
-      send(panel, 'panel.shown', {}) // 열 때 항상 멘션 목록부터(직전 설정 탭 잔상 방지)
-      unread = 0
-      state.setBadge(0)
-      send(pet, EVT.pet, 'idle')
-      send(pet, EVT.badge, 0)
-      if (process.platform === 'darwin') app.dock?.setBadge('')
-    }
+    const win = activePanel()
+    if (!win) return
+    if (win.isVisible()) win.hide()
+    else showPanelHome()
+  }
+
+  function openActivityPanel(id: string): void {
+    const win = activePanel()
+    if (!win) return
+    if (!win.isVisible()) win.show()
+    win.focus()
+    clearPanelBadge()
+    send(win, 'activity.focus', id)
   }
   tray.on('click', () => togglePanel())
 
-  // 펫 창 전용 IPC (window.watchpup.togglePanel / setMouseIgnore)
-  ipcMain.on('pet.togglePanel', () => togglePanel())
+  // 펫 창 전용 IPC (더블클릭은 패널 열기 전용)
+  ipcMain.on('pet.showPanel', () => showPanelHome())
   // 말풍선 클릭 → 패널 열고 해당 스레드 선택
-  ipcMain.on('pet.openMention', (_e, id: string) => {
-    if (!panel || typeof id !== 'string' || !id) return
-    if (!panel.isVisible()) {
-      panel.show()
-      unread = 0
-      state.setBadge(0)
-      send(pet, EVT.badge, 0)
-      if (process.platform === 'darwin') app.dock?.setBadge('')
+  const openMentionPanel = (id: string): void => {
+    const win = activePanel()
+    if (!win || typeof id !== 'string' || !id) return
+    if (!win.isVisible()) {
+      win.show()
+      clearPanelBadge()
     }
-    panel.focus()
-    send(panel, 'mention.focus', id)
+    win.focus()
+    send(win, 'mention.focus', id)
+  }
+  ipcMain.on('pet.openMention', (_e, id: string) => openMentionPanel(id))
+  ipcMain.handle(CMD.activityList, (_e, requestedRange?: ActivityHistoryRange) => {
+    const range: ActivityHistoryRange = ['recent', 'today', '7d', 'all'].includes(requestedRange || '')
+      ? requestedRange as ActivityHistoryRange
+      : 'recent'
+    if (range === 'recent') return currentActivities()
+    return agentPoller?.history(range) ?? localActivities
+  })
+  ipcMain.on('activity.detail', (_e, id?: string) => {
+    const target = typeof id === 'string' ? activityTarget(id) : null
+    if (target?.kind === 'mention') openMentionPanel(target.id)
+    else if (target?.kind === 'external' && id) openActivityPanel(id)
+    else showPanelHome()
+  })
+  ipcMain.on('activity.open', (_e, id: string) => {
+    const target = activityTarget(id)
+    if (!target) return
+    if (target.kind === 'external') {
+      void shell.openExternal(target.url)
+    } else {
+      const mention = mentions.get(target.id)
+      if (mention?.permalink) void shell.openExternal(mention.permalink)
+      else openMentionPanel(target.id)
+    }
   })
   ipcMain.on('pet.setMouseIgnore', (_e, ignore: boolean) => {
     if (pet) pet.setIgnoreMouseEvents(!!ignore, { forward: true })
@@ -183,12 +252,13 @@ async function main(): Promise<void> {
   })
 
   // 맥 스타일 창 컨트롤 (프레임리스 → 커스텀 신호등)
-  ipcMain.on('panel.hide', () => { panel?.hide() })
-  ipcMain.on('panel.minimize', () => { panel?.minimize() })
+  ipcMain.on('panel.hide', () => { activePanel()?.hide() })
+  ipcMain.on('panel.minimize', () => { activePanel()?.minimize() })
   ipcMain.on('panel.maximize', () => {
-    if (!panel) return
-    if (panel.isMaximized()) panel.unmaximize()
-    else panel.maximize()
+    const win = activePanel()
+    if (!win) return
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
   })
 
   // 스레드 추적 on/off · 목록에서 제거
@@ -205,7 +275,9 @@ async function main(): Promise<void> {
 
   // 설정 저장 후 재시작 반영
   ipcMain.on('app.restart', () => {
-    app.relaunch()
+    const args = app.isPackaged ? undefined : localRelaunchArgs(process.argv, process.cwd())
+    if (args) app.relaunch({ args })
+    else app.relaunch()
     app.exit(0)
   })
 
@@ -217,7 +289,6 @@ async function main(): Promise<void> {
     return dest
   }
 
-  ipcMain.handle('pet.images.get', () => petImagesFromDir(configStore.get().petImageDir))
   ipcMain.handle('obsidian.pickVault', async () => {
     const r = await dialog.showOpenDialog({ properties: ['openDirectory'] })
     return r.canceled ? null : r.filePaths[0]
@@ -262,9 +333,10 @@ async function main(): Promise<void> {
       return null
     }
   })
-  ipcMain.handle('pet.codex.get', () => resolveCodexPet(configStore.get().petCodexDir))
   // 스레드 대화 즉석 조회(예전 멘션은 thread가 없을 수 있음)
-  ipcMain.handle('thread.get', (_e, id: string) => (gateway ? gateway.getThread(id) : Promise.resolve([])))
+  ipcMain.handle('thread.get', (_e, id: string, refresh = false) =>
+    gateway ? gateway.getThread(id, !!refresh) : Promise.resolve([]),
+  )
 
   // 코드 레포: 목록·추가(폴더 선택)·삭제 — 코드 원인 조사에 사용(claude --add-dir)
   ipcMain.handle('repos.list', () => configStore.get().repos)
@@ -321,14 +393,32 @@ async function main(): Promise<void> {
     gateway?.reapplyGroups()
     return c.myGroups
   })
-  // 말풍선 크기에 맞춰 펫 창 높이를 동적으로 (하단 고정 → 위로 확장)
-  ipcMain.on('pet.resize', (_e, height: number) => {
-    if (!pet || pet.isDestroyed() || typeof height !== 'number') return
+  // 말풍선은 하단을, HUD 접기·펼치기는 펫이 있는 상단을 기준으로 창 크기를 조절한다.
+  ipcMain.on('pet.resize', (_e, value: number | {
+    width?: number
+    height?: number
+    anchor?: 'left' | 'right'
+    verticalAnchor?: 'top' | 'bottom'
+  }) => {
+    if (!pet || pet.isDestroyed()) return
     const b = pet.getBounds()
-    const h = Math.max(164, Math.min(680, Math.round(height)))
-    if (h === b.height) return
+    const requestedHeight = typeof value === 'number' ? value : value?.height
+    const requestedWidth = typeof value === 'number' ? b.width : value?.width
+    if (typeof requestedHeight !== 'number' || typeof requestedWidth !== 'number') return
+    const workArea = screen.getDisplayMatching(b).workArea
+    const h = Math.max(164, Math.min(800, Math.round(requestedHeight)))
+    const w = Math.max(340, Math.min(workArea.width, 860, Math.round(requestedWidth)))
+    if (h === b.height && w === b.width) return
     const bottom = b.y + b.height
-    pet.setBounds({ x: b.x, y: bottom - h, width: b.width, height: h })
+    const requestedX = typeof value === 'object' && value?.anchor === 'left'
+      ? b.x
+      : b.x + b.width - w
+    const x = Math.max(workArea.x, Math.min(workArea.x + workArea.width - w, Math.round(requestedX)))
+    const requestedY = typeof value === 'object' && value?.verticalAnchor === 'top'
+      ? b.y
+      : bottom - h
+    const y = Math.max(workArea.y, Math.min(workArea.y + workArea.height - h, Math.round(requestedY)))
+    pet.setBounds({ x, y, width: w, height: h })
   })
 
   // 3) 엔진 생성(토큰 불필요) + 이벤트 브리지. 소스(봇/검색)는 아래에서 config·토큰에 따라 부착.
@@ -342,12 +432,14 @@ async function main(): Promise<void> {
     broadcast(EVT.mentionNew, m)
     // 즉시 "분석 중" 상태를 말풍선으로 (준비되면 아래에서 교체). 클릭하면 해당 스레드로.
     send(pet, EVT.bubble, { text: bubbleAnalyzing(m), mentionId: m.id })
+    broadcastActivities()
   })
   gateway.on('mention:ready', (m: Mention) => {
     lastActivity = Date.now()
     broadcast(EVT.mentionReady, m)
     // 펫 말풍선: 내가 해야 할 행동 유도. 클릭하면 해당 스레드가 열림.
     send(pet, EVT.bubble, { text: m.direct === false ? bubbleFollowup(m) : bubbleReady(m), mentionId: m.id })
+    broadcastActivities()
   })
   gateway.on('chat:stream', (p: { mentionId: string; event: AgentStreamEvent; source?: string }) => {
     lastActivity = Date.now()
@@ -371,7 +463,15 @@ async function main(): Promise<void> {
   })
   gateway.on('mentions:refresh', () => {
     broadcast('mentions.refresh', null)
+    broadcastActivities()
   })
+
+  agentPoller = new LocalAgentPoller()
+  agentPoller.on('snapshot', (activities: ActivitySession[]) => {
+    localActivities = activities
+    broadcastActivities()
+  })
+  agentPoller.start()
   gateway.on('badge', (n: number) => {
     unread = n
     send(pet, EVT.badge, n)
@@ -395,7 +495,7 @@ async function main(): Promise<void> {
   refillQuips() // 시작 시 한 배치 미리 생성
   setInterval(() => {
     if (!pet || pet.isDestroyed()) return
-    if (panel?.isVisible()) return
+    if (activePanel()?.isVisible()) return
     if (Date.now() - lastActivity < IDLE_MS) return
     refillQuips() // 캐시 보충(비동기)
     send(pet, EVT.bubble, idleLine())
@@ -406,6 +506,7 @@ async function main(): Promise<void> {
   const botToken = await keychain.get(SecretKeys.slackBotToken)
   const appToken = await keychain.get(SecretKeys.slackAppToken)
   const userToken = await keychain.get(SecretKeys.slackUserToken)
+  if (userToken) gateway.attachUserToken(userToken)
   if (config.enableBot && botToken && appToken) {
     try {
       gateway.attachSocket(botToken, appToken)
@@ -422,11 +523,19 @@ async function main(): Promise<void> {
   ipcMain.handle(CMD.mentionGet, (_e, id: string) => mentions.get(id) ?? null)
   ipcMain.handle(CMD.mentionRead, (_e, id: string) => {
     mentions.markRead(id)
+    broadcastActivities()
+  })
+  ipcMain.handle(CMD.threadImport, (_e, permalink: string) => {
+    if (!gateway) return Promise.reject(new Error('Slack 연결을 초기화하지 못했습니다.'))
+    return gateway.importThread(permalink)
   })
   ipcMain.handle(CMD.todoToggle, (_e, a: TodoToggleArgs) => {
     gateway?.toggleTodo(a.mentionId, a.index)
   })
   ipcMain.handle(CMD.replyApprove, (_e, id: string) => (gateway ? gateway.approveReply(id) : Promise.resolve({ ts: null })))
+  ipcMain.handle(CMD.reactionSet, (_e, a: ReactionSetArgs) =>
+    gateway ? gateway.setReaction(a.mentionId, a.messageTs, a.name, a.active) : Promise.resolve({ thread: [] }),
+  )
   ipcMain.handle('dev.run', (_e, a: { mentionId: string; repoPaths: string[]; extraContext: string }) => {
     if (!gateway) return Promise.resolve()
     send(pet, EVT.chatBubble, { type: 'start' })
@@ -463,7 +572,6 @@ async function main(): Promise<void> {
     send(pet, EVT.chatBubble, { type: 'start' })
     return gateway.chat(a.mentionId, a.text)
   })
-  ipcMain.handle(CMD.settingsGet, () => configStore.get())
   ipcMain.handle(CMD.settingsSet, (_e, patch: SettingsPatch) => {
     const current = configStore.get()
     const merged = {
@@ -473,8 +581,13 @@ async function main(): Promise<void> {
     const c = configStore.update(merged)
     deps.config = c
     bubbleStyle = c.bubbleStyle // 말풍선 표시 방식 즉시 반영 (persona는 다음 분석부터 config로 자동 반영)
-    // 펫 테마·커스텀 이미지·Codex Pet 팩은 재시작 없이 즉시 반영
+    // 펫 테마·크기·말풍선·HUD·커스텀 이미지·Codex Pet 팩은 재시작 없이 즉시 반영
     send(pet, EVT.petTheme, c.petTheme)
+    send(pet, EVT.petSize, c.petSizePercent)
+    send(pet, EVT.bubbleSize, c.bubbleSizePercent)
+    send(pet, EVT.hudSize, c.hudSizePercent)
+    send(pet, EVT.hudAlignment, c.hudAlignment)
+    send(pet, EVT.hudVisibility, c.showActivityHud)
     send(pet, EVT.petImages, petImagesFromDir(c.petImageDir))
     send(pet, EVT.petCodex, resolveCodexPet(c.petCodexDir))
     if (pet && !pet.isDestroyed()) pet.setAlwaysOnTop(c.petAlwaysOnTop) // 즉시 반영
@@ -547,7 +660,7 @@ async function main(): Promise<void> {
     }
   } else {
     const missing: string[] = []
-    if (!gateway.hasSource()) missing.push('슬랙 연결(봇 토큰 또는 User Token+검색 활성화)')
+    if (!gateway.hasSource()) missing.push('슬랙 연결(봇 토큰 또는 User Token)')
     if (!config.mySlackUserId) missing.push('mySlackUserId')
     console.warn(`미설정 — Slack 감시 대기 중: ${missing.join(', ')}. 설정 탭에서 저장 후 앱 재시작.`)
   }
@@ -558,6 +671,8 @@ app.on('window-all-closed', () => {
   /* 트레이 상주: macOS에서 유지 */
 })
 app.on('before-quit', () => {
+  isQuitting = true
+  agentPoller?.stop()
   gateway?.stop().catch(() => {})
 })
 

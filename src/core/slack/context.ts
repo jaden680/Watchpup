@@ -3,6 +3,7 @@
  * 하나의 책임: 에이전트 프롬프트 시드용 최소 맥락 조회.
  */
 import type { WebClient } from '@slack/web-api'
+import type { ThreadMsg, ThreadReaction } from '../types.js'
 import { logger } from '../observability/logger.js'
 
 const nameCache = new Map<string, string>()
@@ -141,6 +142,21 @@ export interface ThreadMsgLite {
   user?: string
   bot_id?: string
   text?: string
+  reactions?: Array<{ name?: string; count?: number; users?: string[] }>
+}
+
+export function mapThreadReactions(
+  reactions: ThreadMsgLite['reactions'],
+  myUserId: string,
+): ThreadReaction[] {
+  return (reactions ?? [])
+    .filter((reaction): reaction is { name: string; count?: number; users?: string[] } => !!reaction.name)
+    .map((reaction) => ({
+      name: reaction.name,
+      count: Math.max(0, reaction.count ?? 0),
+      reacted: !!myUserId && (reaction.users ?? []).includes(myUserId),
+    }))
+    .filter((reaction) => reaction.count > 0)
 }
 export interface SelectOpts {
   /** 이 ts 이후(초과) 메시지만 */
@@ -168,15 +184,21 @@ export async function fetchThreadMessages(
   threadTs: string,
   myUserId: string,
   opts: { limit?: number } = {},
-): Promise<{ author: string; text: string; mine: boolean; ts?: string }[]> {
+): Promise<ThreadMsg[]> {
   try {
     const raw = await fetchReplyMessages(client, channel, threadTs, { limit: opts.limit ?? 100 })
     const selected = selectThreadMessages(raw, {})
-    const out: { author: string; text: string; mine: boolean; ts?: string }[] = []
+    const out: ThreadMsg[] = []
     for (const m of selected) {
       const author = m.user ? await resolveUserName(client, m.user) : m.bot_id ? 'bot' : '?'
       const text = formatSlackPlain(await resolveSubteams(client, await resolveMentions(client, m.text ?? '')))
-      out.push({ author, text: text.trim(), mine: m.user === myUserId, ts: m.ts })
+      out.push({
+        author,
+        text: text.trim(),
+        mine: m.user === myUserId,
+        ts: m.ts,
+        reactions: mapThreadReactions(m.reactions, myUserId),
+      })
     }
     return out
   } catch (err) {

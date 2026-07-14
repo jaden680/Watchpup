@@ -3,6 +3,7 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { compareSlackTs } from '../slack/timestamp.js'
 
 export interface WindowBounds {
   x?: number
@@ -67,6 +68,8 @@ export class StateStore {
 
   getThreadCursor(threadKey: string): string | undefined { return this.state.threadCursor[threadKey] }
   setThreadCursor(threadKey: string, ts: string): void {
+    const current = this.state.threadCursor[threadKey]
+    if (current && compareSlackTs(ts, current) <= 0) return
     this.state.threadCursor[threadKey] = ts
     this.persist()
   }

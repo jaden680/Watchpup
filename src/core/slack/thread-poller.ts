@@ -7,12 +7,29 @@
 import type { WebClient } from '@slack/web-api'
 import type { RawMention } from './search-poller.js'
 import { logger } from '../observability/logger.js'
+import { compareSlackTs, latestSlackTs } from './timestamp.js'
 
-interface RepliesMessage {
+export interface RepliesMessage {
   ts?: string
   user?: string
   bot_id?: string
   text?: string
+}
+
+export function selectLatestHumanFollowup(
+  messages: RepliesMessage[],
+  cursor: string | undefined,
+  mySlackUserId: string,
+): { followup?: RepliesMessage; maxTs?: string } {
+  const fresh = messages.filter((msg) =>
+    !!msg.ts && (!cursor || compareSlackTs(msg.ts, cursor) > 0),
+  )
+  const followup = fresh
+    .filter((msg) => !!msg.user && !msg.bot_id && msg.user !== mySlackUserId)
+    .reduce<RepliesMessage | undefined>((latest, msg) =>
+      !latest?.ts || compareSlackTs(msg.ts!, latest.ts) > 0 ? msg : latest,
+    undefined)
+  return { followup, maxTs: latestSlackTs([cursor, ...fresh.map((msg) => msg.ts)]) }
 }
 
 export class ThreadFollowPoller {
@@ -59,13 +76,17 @@ export class ThreadFollowPoller {
         limit: 30,
       })) as { messages?: RepliesMessage[] }
       const messages = res.messages ?? []
-      let maxTs = cursor
-      for (const msg of messages) {
-        if (!msg.ts) continue
-        if (cursor && parseFloat(msg.ts) <= parseFloat(cursor)) continue
-        if (!maxTs || parseFloat(msg.ts) > parseFloat(maxTs)) maxTs = msg.ts
-        if (!msg.user || msg.bot_id || msg.user === this.mySlackUserId) continue
-        this.onFollowup({ channel, threadTs, messageTs: msg.ts, authorId: msg.user, text: msg.text || '' })
+      const { followup, maxTs } = selectLatestHumanFollowup(messages, cursor, this.mySlackUserId)
+      // 한 번의 폴링에서 같은 스레드의 답글은 최신 메시지 하나로 합친다.
+      // 분석 시 스레드 전체를 다시 읽으므로 중간 답글의 맥락도 함께 반영된다.
+      if (followup?.ts && followup.user) {
+        this.onFollowup({
+          channel,
+          threadTs,
+          messageTs: followup.ts,
+          authorId: followup.user,
+          text: followup.text || '',
+        })
       }
       if (maxTs && maxTs !== cursor) this.setCursor(channel, threadTs, maxTs)
     } catch (err) {

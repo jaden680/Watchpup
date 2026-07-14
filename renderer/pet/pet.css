@@ -1,9 +1,38 @@
 :root {
-  /* 만화책 말풍선: 흰 종이 + 굵은 검정 외곽선(테마 무관하게 코믹 유지) */
-  --bubble-bg: #fdfdfb;
-  --bubble-fg: #17140f;
-  --bubble-outline: #17140f;
+  --bubble-bg: rgba(29, 29, 29, 0.96);
+  --bubble-fg: #f5f5f7;
+  --bubble-outline: rgba(255, 255, 255, 0.16);
   --accent: #d98829;
+  --pet-circle-size: 104px;
+  --pet-media-size: 128px;
+  --pet-face-size: 46px;
+  --bubble-max-width: 320px;
+  --bubble-padding-y: 9px;
+  --bubble-padding-x: 14px;
+  --bubble-radius: 20px;
+  --bubble-font-size: 13px;
+  --bubble-line-height: 17.55px;
+  --bubble-max-height: 91px;
+  --hud-width: 532px;
+  --hud-padding: 7px;
+  --hud-radius: 16px;
+  --hud-row-height: 38px;
+  --hud-dot-column: 8px;
+  --hud-icon-column: 24px;
+  --hud-row-gap: 8px;
+  --hud-row-padding: 9px;
+  --hud-row-radius: 10px;
+  --hud-dot-size: 7px;
+  --hud-icon-size: 22px;
+  --hud-icon-radius: 6px;
+  --hud-title-size: 13px;
+  --hud-pill-padding-y: 3px;
+  --hud-pill-padding-x: 7px;
+  --hud-meta-size: 10px;
+  --hud-elapsed-width: 31px;
+  --hud-badge-size: 38px;
+  --surface-safe-x: 28px;
+  --surface-safe-bottom: 34px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -24,60 +53,248 @@ body {
 body {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-end;
   justify-content: flex-end;
-  gap: 17px;
-  padding: 10px 14px 12px;
+  gap: 12px;
+  padding: 10px var(--surface-safe-x) var(--surface-safe-bottom);
   box-sizing: border-box;
 }
 
-/* ---- 만화책 말풍선 (내용에 맞춰 크기, 아래 뾰족 꼬리로 펫을 가리킴) ---- */
-.bubble {
-  align-self: center;
-  width: fit-content;
-  max-width: 100%;
-  /* 잘림/스크롤 없음 — 내용 전체가 보이도록 말풍선이 커지고(syncSize), 꼬리가 안 잘리게 overflow visible */
+body.hud-align-left { align-items: flex-start; }
+body.hud-align-right { align-items: flex-end; }
+
+/* ---- 최근 Claude / Codex / Slack 활동 ---- */
+.activity-hud {
+  width: min(var(--hud-width), 100%);
+  padding: var(--hud-padding);
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--hud-radius);
+  background: rgba(19, 21, 24, 0.94);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 8px 22px rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  pointer-events: auto;
+}
+.activity-hud.hidden { display: none; }
+.activity-hud.folded {
+  width: var(--hud-badge-size);
+  height: var(--hud-badge-size);
+  padding: 0;
+  border-radius: 50%;
+}
+.hud-fold {
+  width: 100%;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 2px;
+  padding: 2px var(--hud-row-padding);
+  border: 0;
+  border-radius: var(--hud-row-radius);
+  background: transparent;
+  color: rgba(245, 245, 247, 0.7);
+  font: 650 var(--hud-meta-size)/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  cursor: pointer;
+}
+.hud-fold:hover { background: rgba(255, 255, 255, 0.08); color: #f5f5f7; }
+.hud-fold:active { background: rgba(255, 255, 255, 0.12); }
+.hud-fold:focus-visible { outline: 2px solid rgba(83, 155, 245, 0.9); outline-offset: -2px; }
+.hud-fold-action { color: #a8c8f3; }
+.activity-hud.folded .hud-fold {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  color: #f5f5f7;
+  font-size: max(10px, var(--hud-title-size));
+}
+.activity-hud.folded .hud-fold-action { display: none; }
+.activity-hud.folded .hud-message,
+.activity-hud.folded .activity-list { display: none; }
+.hud-message {
+  width: 100%;
+  min-height: var(--hud-row-height);
+  display: grid;
+  grid-template-columns: var(--hud-dot-column) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--hud-row-gap);
+  box-sizing: border-box;
+  margin: 0 0 2px;
+  padding: 4px var(--hud-row-padding);
+  border: 0;
+  border-radius: var(--hud-row-radius);
+  background: rgba(255, 255, 255, 0.07);
+  color: #f5f5f7;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.hud-message.hidden { display: none; }
+.hud-message:hover { background: rgba(255, 255, 255, 0.1); }
+.hud-message:active { background: rgba(255, 255, 255, 0.13); }
+.hud-message:focus-visible { outline: 2px solid rgba(83, 155, 245, 0.9); outline-offset: -2px; }
+.hud-message-dot {
+  width: var(--hud-dot-size);
+  height: var(--hud-dot-size);
+  border-radius: 50%;
+  background: #6fa9ef;
+  box-shadow: 0 0 0 3px rgba(111, 169, 239, 0.13);
+}
+.hud-message.streaming .hud-message-dot {
+  background: #50d890;
+  box-shadow: 0 0 0 3px rgba(80, 216, 144, 0.14);
+}
+.hud-message-text {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: var(--hud-title-size);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.12px;
+  word-break: break-word;
+}
+.activity-list { display: grid; gap: 2px; }
+.activity-row {
+  width: 100%;
+  height: var(--hud-row-height);
+  display: grid;
+  grid-template-columns: var(--hud-dot-column) var(--hud-icon-column) minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: var(--hud-row-gap);
+  padding: 0 var(--hud-row-padding);
+  border: 0;
+  border-radius: var(--hud-row-radius);
+  background: transparent;
+  color: #f5f5f7;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.activity-row:hover { background: rgba(255, 255, 255, 0.08); }
+.activity-row:active { background: rgba(255, 255, 255, 0.12); }
+.activity-row:focus-visible { outline: 2px solid rgba(83, 155, 245, 0.9); outline-offset: -2px; }
+.activity-dot {
+  width: var(--hud-dot-size);
+  height: var(--hud-dot-size);
+  border-radius: 50%;
+  background: #8d929b;
+  box-shadow: 0 0 0 3px rgba(141, 146, 155, 0.12);
+}
+.state-running .activity-dot { background: #50d890; box-shadow: 0 0 0 3px rgba(80, 216, 144, 0.14); }
+.state-done .activity-dot { background: #6fa9ef; box-shadow: 0 0 0 3px rgba(111, 169, 239, 0.13); }
+.state-error .activity-dot { background: #ff6b6b; box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.14); }
+.activity-icon {
+  width: var(--hud-icon-size);
+  height: var(--hud-icon-size);
+  border-radius: var(--hud-icon-radius);
+  object-fit: contain;
+}
+.activity-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--hud-title-size);
+  font-weight: 550;
+  letter-spacing: -0.12px;
+}
+.activity-state,
+.activity-context {
+  padding: var(--hud-pill-padding-y) var(--hud-pill-padding-x);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(245, 245, 247, 0.76);
+  font-size: var(--hud-meta-size);
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+.state-running .activity-state { color: #8eeab7; background: rgba(80, 216, 144, 0.1); }
+.state-error .activity-state { color: #ffaaaa; background: rgba(255, 107, 107, 0.1); }
+.activity-context { color: #a8c8f3; }
+.activity-elapsed {
+  grid-column: 6;
+  min-width: var(--hud-elapsed-width);
+  color: rgba(245, 245, 247, 0.48);
+  font-size: var(--hud-meta-size);
+  text-align: right;
+  white-space: nowrap;
+}
+.activity-open {
+  grid-column: 7;
+  width: calc(var(--hud-icon-size) + 2px);
+  height: calc(var(--hud-icon-size) + 2px);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(168, 200, 243, 0.26);
+  border-radius: 999px;
+  background: rgba(83, 155, 245, 0.1);
+  color: #b9d5f7;
+  cursor: pointer;
+}
+.activity-open svg {
+  width: max(11px, calc(var(--hud-icon-size) * 0.58));
+  height: max(11px, calc(var(--hud-icon-size) * 0.58));
   overflow: visible;
-  padding: 11px 16px;
-  border-radius: 24px;
-  border: 3px solid var(--bubble-outline);   /* 만화책 굵은 외곽선 */
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.activity-open[hidden] { display: none; }
+.activity-open:hover { background: rgba(83, 155, 245, 0.2); color: #e0edfc; }
+.activity-open:active { background: rgba(83, 155, 245, 0.28); }
+.activity-open:focus-visible { outline: 2px solid rgba(83, 155, 245, 0.9); outline-offset: 1px; }
+.activity-open:disabled { opacity: 0.4; cursor: default; }
+
+/* ---- 말풍선 ---- */
+.bubble {
+  width: fit-content;
+  max-width: min(var(--bubble-max-width), 100%);
+  box-sizing: border-box;
+  /* HUD가 창 폭을 넓혀도 말풍선은 기존 컴팩트 폭을 유지한다. */
+  max-height: var(--bubble-max-height);
+  overflow: hidden;
+  padding: var(--bubble-padding-y) var(--bubble-padding-x);
+  border-radius: var(--bubble-radius);
+  border: 1px solid var(--bubble-outline);
   background: var(--bubble-bg);
   color: var(--bubble-fg);
-  font: 700 12.5px/1.4 "Comic Sans MS", "Chalkboard SE", -apple-system, BlinkMacSystemFont, sans-serif;
-  box-shadow: 3px 4px 0 rgba(23, 20, 15, 0.28);  /* 코믹 하드 오프셋 그림자 */
+  font: 600 var(--bubble-font-size)/var(--bubble-line-height) -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  letter-spacing: -0.12px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 4px 12px rgba(0, 0, 0, 0.34);
   cursor: pointer;
   pointer-events: auto;
   position: relative;
-  animation: bubble-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);  /* 살짝 튀는 팝 */
+  animation: bubble-in 0.18s ease-out;
   word-break: break-word;
   white-space: pre-wrap;
-  text-align: center;
+  text-align: left;
 }
 
 .bubble.clickable { border-color: var(--accent); }
-.bubble.clickable::before { border-top-color: var(--accent); }
-.bubble.clickable:hover { transform: translateY(-1px); box-shadow: 3px 5px 0 rgba(23, 20, 15, 0.32); }
-
-/* 꼬리: 검정 외곽 삼각형(::before) 위에 흰 채움 삼각형(::after) — 외곽선이 이어져 보이게 */
-.bubble::before {
-  content: "";
-  position: absolute;
-  bottom: -18px;
-  left: 50%;
-  transform: translateX(-50%);
-  border-left: 13px solid transparent;
-  border-right: 13px solid transparent;
-  border-top: 18px solid var(--bubble-outline);
-}
-.bubble::after {
-  content: "";
-  position: absolute;
-  bottom: -9px;                 /* 3px 외곽선 위로 겹쳐 이음새를 덮음 */
-  left: 50%;
-  transform: translateX(-50%);
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-  border-top: 13px solid var(--bubble-bg);
+.bubble.clickable:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 5px 14px rgba(0, 0, 0, 0.38);
 }
 
 .bubble.hidden {
@@ -85,16 +302,16 @@ body {
 }
 
 @keyframes bubble-in {
-  from { opacity: 0; transform: translateY(8px) scale(0.94); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ---- 펫 ---- */
 #pet {
   position: relative;
   flex: 0 0 auto;
-  width: 104px;
-  height: 104px;
+  width: var(--pet-circle-size);
+  height: var(--pet-circle-size);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -112,7 +329,7 @@ body {
 }
 
 .face {
-  font-size: 46px;
+  font-size: var(--pet-face-size);
   line-height: 1;
   pointer-events: none;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2));
@@ -123,8 +340,8 @@ body {
 
 /* 커스텀 이미지 모드: 공모양 배경/그림자/애니메이션 제거, 이미지 자유 */
 #pet.img-mode {
-  width: 128px;
-  height: 128px;
+  width: var(--pet-media-size);
+  height: var(--pet-media-size);
   border-radius: 0;
   background: none !important;
   box-shadow: none !important;

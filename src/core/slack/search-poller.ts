@@ -17,6 +17,10 @@ export interface RawMention {
   needsRootResolve?: boolean
   /** 나를 직접 @멘션(또는 유저그룹 멘션)한 것인지 — true면 기존 스레드라도 다시 알림 */
   direct?: boolean
+  /** 수동 가져오기처럼 호출자가 미리 정한 저장 ID */
+  requestId?: string
+  /** 사용자가 붙여넣은 원본 링크를 그대로 보존 */
+  permalink?: string
 }
 
 interface SearchMatch {

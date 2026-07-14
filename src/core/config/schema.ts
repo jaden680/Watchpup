@@ -73,6 +73,16 @@ export const watchpupConfigSchema = z.object({
   petTheme: z.string().default('paw'),
   // 펫을 항상 다른 창 위에 표시할지 (off면 일반 창처럼 뒤로 갈 수 있음)
   petAlwaysOnTop: z.boolean().default(true),
+  // 펫 표시 크기(%). 이모지·커스텀 이미지·Codex Pet에 공통 적용.
+  petSizePercent: z.number().int().min(50).max(200).default(100),
+  // 펫 위에 잠깐 표시되는 상태/분석 말풍선 크기(%).
+  bubbleSizePercent: z.number().int().min(60).max(140).default(100),
+  // 펫 아래에 표시되는 Claude/Codex/Slack 세션 HUD 크기(%).
+  hudSizePercent: z.number().int().min(60).max(140).default(100),
+  // 펫·말풍선·HUD가 공유하는 가로 기준선. 화면 오른쪽 배치를 고려해 오른쪽이 기본.
+  hudAlignment: z.enum(['left', 'right']).default('right'),
+  // 세션 HUD를 화면에 표시할지. 수집은 이 값과 무관하게 계속된다.
+  showActivityHud: z.boolean().default(true),
   // 커스텀 펫 이미지 폴더(설정 시 이모지 대신 이미지 사용, 공모양 배경 제거).
   // 폴더에 idle/thinking/ready/chatting.(gif|png|apng|webp|jpg) 파일을 두면 상태별로 사용.
   petImageDir: z.string().default(''),

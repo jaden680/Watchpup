@@ -45,6 +45,7 @@ npm run setup       # CLI: SLACK_BOT_TOKEN(xoxb-...), SLACK_APP_TOKEN(xapp-...) 
 
 - **내 Slack User ID** (`mySlackUserId`) — 필수. 이 사용자를 향한 멘션만 감지한다.
 - **후속 스레드 추적** (`followThreads`) — 내가 참여한 스레드의 후속 메시지도 감지할지.
+- **펫 크기** (`petSizePercent`) — 이모지·커스텀 이미지·Codex Pet 표시 크기(50~200%, 저장 즉시 반영).
 - **Obsidian** — `enabled`/`vaultPath`/`folder`. 활성화 시 멘션마다 노트가 생성된다.
 - **모델** (`model`) — claude 분석에 사용할 모델 이름(기본 `opus`).
 

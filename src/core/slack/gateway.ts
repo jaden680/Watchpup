@@ -25,6 +25,8 @@ import { AuditStore } from '../observability/audit.js'
 import { SearchPoller, type RawMention } from './search-poller.js'
 import { ThreadFollowPoller } from './thread-poller.js'
 import { decideIngest } from './ingest-filter.js'
+import { compareSlackTs, latestSlackTs } from './timestamp.js'
+import { parseSlackThreadPermalink } from './permalink.js'
 import { threadText as buildThreadText, actionContext, devContext, devTitle } from '../watchpup/mention-context.js'
 
 export interface GatewayDeps {
@@ -39,6 +41,11 @@ export interface GatewayDeps {
   lessons: LessonStore
 }
 
+export interface ThreadImportResult {
+  id: string
+  existing: boolean
+}
+
 /**
  * 감지원 독립 엔진. 소켓(봇) / 검색 폴링(내 계정)을 attach로 붙이면 되고, 둘 다 붙여
  * 동시 사용 가능. 두 소스 모두 handleMention(raw, client)로 수렴한다.
@@ -51,6 +58,7 @@ export class WatchpupGateway extends EventEmitter {
   private userClient: WebClient | null = null
   private poller: SearchPoller | null = null
   private followPoller: ThreadFollowPoller | null = null
+  private pendingThreadImports = new Map<string, string>()
   /** 내가 속한 유저그룹 ID/핸들(@team) — attachUserSearch에서 usergroups.list로 채워짐(usergroups:read 필요) */
   private myGroupIds: string[] = []
   private groupHandles: string[] = []
@@ -95,6 +103,25 @@ export class WatchpupGateway extends EventEmitter {
     return this.userClient ?? this.botClient
   }
 
+  /** 쓰기 작업(답장·리액션)을 사용자 계정으로 실행할 수 있도록 User Token 클라이언트를 준비한다. */
+  attachUserToken(userToken: string): void {
+    this.userClient = new WebClient(userToken)
+    this.attachFollowPoller(this.userClient, this.cfg().mySlackUserId, this.cfg().searchIntervalSec)
+  }
+
+  private attachFollowPoller(client: WebClient, myUserId: string, intervalSec: number): void {
+    if (!this.cfg().followThreads || !myUserId || this.followPoller) return
+    this.followPoller = new ThreadFollowPoller(
+      client,
+      () => this.deps.state.trackedThreads(),
+      (channel, threadTs) => this.deps.state.getThreadCursor(threadKey(channel, threadTs)),
+      (channel, threadTs, ts) => this.deps.state.setThreadCursor(threadKey(channel, threadTs), ts),
+      myUserId,
+      intervalSec,
+      (raw) => { void this.handleMention(raw, client) },
+    )
+  }
+
   /** 봇(소켓) 소스 부착 — 봇이 초대된 채널의 @나 멘션/스레드 후속을 즉시 감지 */
   attachSocket(botToken: string, appToken: string): void {
     this.app = new App({ token: botToken, appToken, socketMode: true, logLevel: LogLevel.WARN })
@@ -119,24 +146,73 @@ export class WatchpupGateway extends EventEmitter {
 
   /** 내 계정(User Token) 검색 폴링 소스 부착 — 전 채널의 @나 멘션 (+ 스레드 후속, 유저그룹 검색) */
   attachUserSearch(userToken: string, myUserId: string, intervalSec: number): void {
-    this.userClient = new WebClient(userToken)
+    if (!this.userClient) this.attachUserToken(userToken)
+    const client = this.userClient!
     // groupHandles는 참조로 넘겨 resolveMyGroups()가 나중에(비동기) 채워도 다음 폴링부터 반영되게 한다.
-    this.poller = new SearchPoller(this.userClient, myUserId, intervalSec, (raw) => {
-      void this.handleMention(raw, this.userClient!)
+    this.poller = new SearchPoller(client, myUserId, intervalSec, (raw) => {
+      void this.handleMention(raw, client)
     }, this.groupHandles)
     this.applyGroupsFromConfig()
 
-    if (this.cfg().followThreads) {
-      this.followPoller = new ThreadFollowPoller(
-        this.userClient,
-        () => this.deps.state.trackedThreads(),
-        (channel, threadTs) => this.deps.state.getThreadCursor(threadKey(channel, threadTs)),
-        (channel, threadTs, ts) => this.deps.state.setThreadCursor(threadKey(channel, threadTs), ts),
-        myUserId,
-        intervalSec,
-        (raw) => { void this.handleMention(raw, this.userClient!) },
-      )
+    this.attachFollowPoller(client, myUserId, intervalSec)
+  }
+
+  /** 사용자가 붙여넣은 과거 Slack 스레드를 나이·멘션 필터 없이 분석하고 추적한다. */
+  async importThread(permalink: string): Promise<ThreadImportResult> {
+    const target = parseSlackThreadPermalink(permalink)
+    const key = threadKey(target.channel, target.threadTs)
+    const linkedId = this.deps.state.mentionIdFor(key)
+    const existing = (linkedId ? this.deps.mentions.get(linkedId) : undefined)
+      ?? this.deps.mentions.all().find((mention) => mention.channel === target.channel && mention.threadTs === target.threadTs)
+    if (existing) {
+      if (existing.tracked === false || !linkedId) this.setTracked(existing.id, true)
+      return { id: existing.id, existing: true }
     }
+    if (linkedId) this.deps.state.unlinkThread(key)
+    const pendingId = this.pendingThreadImports.get(key)
+    if (pendingId) return { id: pendingId, existing: true }
+
+    const clients = [this.userClient, this.botClient].filter((client): client is WebClient => !!client)
+    if (!clients.length) throw new Error('Slack User Token 또는 Bot Token을 먼저 연결해주세요.')
+
+    let client: WebClient | null = null
+    let root: { ts?: string; user?: string; bot_id?: string; text?: string } | undefined
+    let firstError: unknown
+    for (const candidate of clients) {
+      try {
+        const response = await candidate.conversations.replies({
+          channel: target.channel,
+          ts: target.threadTs,
+          limit: 1,
+        })
+        root = response.messages?.[0] as typeof root
+        client = candidate
+        break
+      } catch (err) {
+        firstError ??= err
+      }
+    }
+    if (!client) throw firstError ?? new Error('Slack 스레드를 읽지 못했습니다.')
+    if (!root?.ts) throw new Error('Slack 스레드의 첫 메시지를 찾지 못했습니다.')
+
+    const id = randomUUID()
+    const raw: RawMention = {
+      channel: target.channel,
+      threadTs: target.threadTs,
+      messageTs: root.ts,
+      authorId: root.user || root.bot_id || '',
+      text: root.text || '(텍스트 없는 메시지)',
+      requestId: id,
+      permalink: permalink.trim(),
+    }
+    this.pendingThreadImports.set(key, id)
+    const job = this.deps.mutex.run(key, () => this.deps.semaphore.run(() => this.ingest(raw, client!)))
+    void job
+      .catch((err) => logger.error('수동 스레드 가져오기 실패', { channel: target.channel, threadTs: target.threadTs, err: String(err) }))
+      .finally(() => {
+        if (this.pendingThreadImports.get(key) === id) this.pendingThreadImports.delete(key)
+      })
+    return { id, existing: false }
   }
 
   /** 두 소스의 공통 진입점: 수집·필터(dedup·나이컷) → (필요 시) 스레드 root 해석 → 스레드별 직렬화 → 분석 */
@@ -179,6 +255,11 @@ export class WatchpupGateway extends EventEmitter {
     }
     const resolved: RawMention = { ...raw, threadTs }
     const key = threadKey(resolved.channel, threadTs)
+    const cursor = this.deps.state.getThreadCursor(key)
+    if (cursor && compareSlackTs(resolved.messageTs, cursor) <= 0) {
+      logger.info('이미 읽은 스레드 메시지 수집 제외', { channel: resolved.channel, ts: resolved.messageTs })
+      return
+    }
     void this.deps.mutex.run(key, () => this.deps.semaphore.run(() => this.ingest(resolved, client)))
   }
 
@@ -187,17 +268,21 @@ export class WatchpupGateway extends EventEmitter {
     const tKey = threadKey(raw.channel, raw.threadTs)
     const existingId = this.deps.state.mentionIdFor(tKey)
     const isNew = !existingId
-    const id = existingId ?? randomUUID()
+    const id = existingId ?? raw.requestId ?? randomUUID()
     const myId = this.cfg().mySlackUserId
     try {
       const [thread, authorName, channelName, permalink, text] = await Promise.all([
         fetchThreadMessages(client, raw.channel, raw.threadTs, myId, { limit: this.cfg().threadFetchLimit }),
         resolveUserName(client, raw.authorId),
         resolveChannelName(client, raw.channel),
-        getPermalink(client, raw.channel, raw.messageTs),
+        raw.permalink ? Promise.resolve(raw.permalink) : getPermalink(client, raw.channel, raw.messageTs),
         resolveMentions(client, stripMention(raw.text, myId)).then((t) => resolveSubteams(client, t)).then(formatSlackPlain),
       ])
       const threadText = thread.map((m) => `${m.author}: ${m.text.replace(/\s+/g, ' ').trim()}`).join('\n')
+      // fetchThreadMessages로 실제 읽은 최신 메시지까지 즉시 기록한다. 새 스레드를 추적 목록에
+      // 넣기 전에 저장해 후속 폴러가 과거 답글을 새 메시지로 재수집하지 않게 한다.
+      const latestReadTs = latestSlackTs([raw.messageTs, ...thread.map((m) => m.ts)]) ?? raw.messageTs
+      this.deps.state.setThreadCursor(tKey, latestReadTs)
       const placeholder: Mention = {
         id, channel: raw.channel, channelName, threadTs: raw.threadTs, messageTs: raw.messageTs,
         permalink, authorId: raw.authorId, authorName, text, mentionedAt: Date.now(),
@@ -212,7 +297,7 @@ export class WatchpupGateway extends EventEmitter {
         { ...placeholder, threadText: threadText || raw.text, mentionedAt: placeholder.mentionedAt,
           onEvent: (e) => this.emit('chat:stream', { mentionId: id, event: e, source: 'analysis' }) },
       )
-      mention.direct = !!raw.direct
+      if (typeof raw.direct === 'boolean') mention.direct = raw.direct
       mention.thread = thread
       this.deps.mentions.set(id, mention)
       saveMentionNote(this.cfg().obsidian, mention)
@@ -256,6 +341,46 @@ export class WatchpupGateway extends EventEmitter {
       text, write: true, approved: true, outcome: 'ok',
     })
     return { ts: (res.ts as string) ?? null }
+  }
+
+  /** 스레드 메시지 리액션 추가/취소 — 사용자 토큰으로 실행해 내 Slack 계정의 반응으로 남긴다. */
+  async setReaction(
+    mentionId: string,
+    messageTs: string,
+    name: string,
+    active: boolean,
+  ): Promise<{ thread: ThreadMsg[] }> {
+    const m = this.deps.mentions.get(mentionId)
+    if (!m || !messageTs || !/^[a-z0-9_+-]{1,100}$/i.test(name)) return { thread: m?.thread ?? [] }
+    if (!this.userClient) throw new Error('리액션에는 reactions:write 권한이 있는 User Token이 필요합니다.')
+
+    try {
+      if (active) await this.userClient.reactions.add({ channel: m.channel, timestamp: messageTs, name })
+      else await this.userClient.reactions.remove({ channel: m.channel, timestamp: messageTs, name })
+    } catch (err) {
+      const code = (err as { data?: { error?: string } })?.data?.error
+      const alreadyInDesiredState = (active && code === 'already_reacted') || (!active && code === 'no_reaction')
+      if (!alreadyInDesiredState) throw err
+    }
+
+    const message = m.thread?.find((item) => item.ts === messageTs)
+    if (message) {
+      const reactions = message.reactions ?? (message.reactions = [])
+      const existing = reactions.find((reaction) => reaction.name === name)
+      if (existing) {
+        if (existing.reacted !== active) existing.count += active ? 1 : -1
+        existing.reacted = active
+        if (existing.count <= 0) message.reactions = reactions.filter((reaction) => reaction !== existing)
+      } else if (active) {
+        reactions.push({ name, count: 1, reacted: true })
+      }
+    }
+    this.deps.mentions.set(mentionId, m)
+    this.deps.audit.record({
+      ts: Date.now(), requestId: m.id, channel: m.channel, kind: active ? 'reaction.add' : 'reaction.remove',
+      text: `:${name}:`, write: true, approved: true, outcome: 'ok',
+    })
+    return { thread: m.thread ?? [] }
   }
 
   /** 답장 초안을 요청 톤으로 리라이트 → 초안 갱신 후 새 텍스트 반환 */
@@ -531,11 +656,11 @@ export class WatchpupGateway extends EventEmitter {
   }
 
   /** 멘션의 스레드 대화를 (없으면) 즉석 조회해 캐시 — 예전에 저장돼 thread가 없는 멘션 대비 */
-  async getThread(mentionId: string): Promise<ThreadMsg[]> {
+  async getThread(mentionId: string, refresh = false): Promise<ThreadMsg[]> {
     const m = this.deps.mentions.get(mentionId)
     const client = this.replyClient()
     if (!m || !client) return m?.thread ?? []
-    if (m.thread && m.thread.length) return m.thread
+    if (!refresh && m.thread && m.thread.length) return m.thread
     const thread = await fetchThreadMessages(client, m.channel, m.threadTs, this.cfg().mySlackUserId, { limit: this.cfg().threadFetchLimit })
     m.thread = thread
     this.deps.mentions.set(mentionId, m)
@@ -584,7 +709,7 @@ export class WatchpupGateway extends EventEmitter {
 
   /** 부착된 소스가 하나라도 있으면 true */
   hasSource(): boolean {
-    return !!this.app || !!this.poller
+    return !!this.app || !!this.poller || !!this.followPoller
   }
 
   async start(): Promise<void> {

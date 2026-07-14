@@ -18,6 +18,7 @@
         <div class="topbar-right">
           <div id="tabs" role="tablist">
             <button class="tab active" data-tab="mentions" role="tab">멘션</button>
+            <button class="tab" data-tab="agent" role="tab">Agent</button>
             <button class="tab" data-tab="todos" role="tab">할 일</button>
             <button class="tab" data-tab="digest" role="tab">주간</button>
             <button class="tab" data-tab="settings" role="tab">설정</button>
@@ -29,6 +30,10 @@
         <div id="list-col">
           <div id="list-search">
             <input id="list-search-input" type="search" placeholder="🔍 채널·작성자·내용 검색" autocomplete="off" />
+            <div class="thread-import-row">
+              <button type="button" id="thread-import-open">＋ 과거 Slack 스레드 추가</button>
+              <span id="thread-import-state" role="status" aria-live="polite"></span>
+            </div>
             <div id="cat-filter">
               <button type="button" class="cat-chip active" data-cat="">전체</button>
               <button type="button" class="cat-chip" data-cat="issue">이슈</button>
@@ -49,6 +54,47 @@
             <div class="empty-mark">🐾</div>
             <p class="empty-title">왼쪽에서 멘션을 골라보세요</p>
             <p class="empty-sub">새 멘션이 오면 여기에 요약·조언·할 일이 정리됩니다.</p>
+          </div>
+        </main>
+      </section>
+
+      <section id="agent-view" class="view">
+        <div id="agent-list-col">
+          <div id="agent-list-tools">
+            <input id="agent-search-input" type="search" placeholder="세션 제목·대화 검색" autocomplete="off" />
+            <div class="agent-filter-row">
+              <select id="agent-source-filter" aria-label="에이전트 출처 필터">
+                <option value="">전체 Agent</option>
+                <option value="codex">Codex</option>
+                <option value="claude">Claude</option>
+              </select>
+              <select id="agent-state-filter" aria-label="에이전트 상태 필터">
+                <option value="">전체 상태</option>
+                <option value="running">진행 중</option>
+                <option value="done">완료</option>
+                <option value="waiting">대기</option>
+                <option value="error">오류</option>
+              </select>
+              <select id="agent-period-filter" aria-label="에이전트 기간 필터">
+                <option value="recent">최근 30분</option>
+                <option value="today" selected>오늘</option>
+                <option value="7d">최근 7일</option>
+                <option value="all">전체</option>
+              </select>
+              <select id="agent-sort" aria-label="에이전트 정렬">
+                <option value="newest">최신순</option>
+                <option value="oldest">오래된순</option>
+              </select>
+            </div>
+          </div>
+          <aside id="agent-list" aria-label="Agent 대화 목록"></aside>
+        </div>
+        <div id="agent-list-divider" title="드래그해서 목록 너비 조절"></div>
+        <main id="agent-detail" aria-label="Agent 대화 상세">
+          <div class="empty">
+            <div class="empty-mark">⌁</div>
+            <p class="empty-title">왼쪽에서 Agent 세션을 골라보세요</p>
+            <p class="empty-sub">Codex와 Claude의 진행 상태와 최근 대화를 확인할 수 있습니다.</p>
           </div>
         </main>
       </section>
@@ -142,7 +188,7 @@
               </label>
               <label>
                 User Token (xoxp-)
-                <input type="password" name="userToken" placeholder="변경 시에만 입력 (전 채널 검색용)" autocomplete="off" />
+                <input type="password" name="userToken" placeholder="변경 시에만 입력 (검색·과거 스레드용)" autocomplete="off" />
               </label>
             </fieldset>
             <fieldset>
@@ -196,6 +242,50 @@
                 <option value="ghost">👻 유령</option>
                 <option value="bear">🐻 곰</option>
                 <option value="chick">🐥 병아리</option>
+              </select>
+            </label>
+            <label class="pet-size-field">
+              <span class="pet-size-head">
+                <span>펫 크기</span>
+                <output id="pet-size-value" for="pet-size">100%</output>
+              </span>
+              <span class="pet-size-control">
+                <span>작게</span>
+                <input id="pet-size" type="range" name="petSizePercent" min="50" max="200" step="10" value="100" />
+                <span>크게</span>
+              </span>
+            </label>
+            <label class="pet-size-field">
+              <span class="pet-size-head">
+                <span>말풍선 크기</span>
+                <output id="bubble-size-value" for="bubble-size">100%</output>
+              </span>
+              <span class="pet-size-control">
+                <span>작게</span>
+                <input id="bubble-size" type="range" name="bubbleSizePercent" min="60" max="140" step="10" value="100" />
+                <span>크게</span>
+              </span>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" name="showActivityHud" checked />
+              세션 HUD 표시
+            </label>
+            <label class="pet-size-field" id="hud-size-field">
+              <span class="pet-size-head">
+                <span>세션 HUD 크기</span>
+                <output id="hud-size-value" for="hud-size">100%</output>
+              </span>
+              <span class="pet-size-control">
+                <span>작게</span>
+                <input id="hud-size" type="range" name="hudSizePercent" min="60" max="140" step="10" value="100" />
+                <span>크게</span>
+              </span>
+            </label>
+            <label id="hud-alignment-field">
+              세션 HUD 정렬
+              <select name="hudAlignment">
+                <option value="left">왼쪽</option>
+                <option value="right">오른쪽</option>
               </select>
             </label>
             <div class="petimg">
