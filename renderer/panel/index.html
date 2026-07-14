@@ -30,6 +30,10 @@
         <div id="list-col">
           <div id="list-search">
             <input id="list-search-input" type="search" placeholder="🔍 채널·작성자·내용 검색" autocomplete="off" />
+            <div class="thread-import-row">
+              <button type="button" id="thread-import-open">＋ 과거 Slack 스레드 추가</button>
+              <span id="thread-import-state" role="status" aria-live="polite"></span>
+            </div>
             <div id="cat-filter">
               <button type="button" class="cat-chip active" data-cat="">전체</button>
               <button type="button" class="cat-chip" data-cat="issue">이슈</button>
@@ -184,7 +188,7 @@
               </label>
               <label>
                 User Token (xoxp-)
-                <input type="password" name="userToken" placeholder="변경 시에만 입력 (전 채널 검색용)" autocomplete="off" />
+                <input type="password" name="userToken" placeholder="변경 시에만 입력 (검색·과거 스레드용)" autocomplete="off" />
               </label>
             </fieldset>
             <fieldset>

@@ -185,6 +185,8 @@ async function refresh() {
 let listQuery = ''
 let listCat = '' // '' = 전체
 let todoOnly = false
+let pendingThreadImportId = null
+let importedThreadId = null
 function matchesCat(m) {
   return !listCat || (m.analysis && m.analysis.category === listCat)
 }
@@ -312,12 +314,21 @@ function select(id) {
 window.watchpup.onMentionNew((m) => {
   state.mentions.set(m.id, m)
   renderList()
+  if (pendingThreadImportId === m.id) {
+    pendingThreadImportId = null
+    setThreadImportState('추가됨 · 분석 중')
+    select(m.id)
+  }
 })
 
 window.watchpup.onMentionReady((m) => {
   state.mentions.set(m.id, m)
   renderList()
   if (state.current === m.id) renderDetail(m)
+  if (importedThreadId === m.id) {
+    importedThreadId = null
+    setThreadImportState('과거 스레드 분석 완료', 4000)
+  }
 })
 
 // 채널 라벨 일괄 갱신 등 → 목록/상세 새로고침
@@ -370,6 +381,106 @@ if (searchInput) {
     renderList()
   })
 }
+
+const threadImportButton = document.getElementById('thread-import-open')
+const threadImportState = document.getElementById('thread-import-state')
+
+function setThreadImportState(text, clearAfterMs = 0) {
+  if (!threadImportState) return
+  threadImportState.textContent = text
+  if (clearAfterMs) setTimeout(() => {
+    if (threadImportState.textContent === text) threadImportState.textContent = ''
+  }, clearAfterMs)
+}
+
+function threadImportError(error) {
+  const message = error?.message || String(error || '')
+  if (message.includes('missing_scope')) {
+    return 'User Token에 채널 기록 읽기 권한이 없어요. 설정의 새 매니페스트로 Slack 앱을 재설치해주세요.'
+  }
+  if (message.includes('channel_not_found') || message.includes('no_permission')) {
+    return '이 채널을 읽을 수 없어요. User Token 계정의 채널 접근 권한을 확인해주세요.'
+  }
+  return message.replace(/^Error invoking remote method '[^']+': Error: /, '') || '스레드를 추가하지 못했습니다.'
+}
+
+function openThreadImportModal() {
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  const box = document.createElement('form')
+  box.className = 'modal-box modal-form'
+  const title = document.createElement('div')
+  title.className = 'modal-title'
+  title.textContent = '과거 Slack 스레드 추가'
+  const label = document.createElement('label')
+  label.className = 'modal-field'
+  label.textContent = 'Slack 메시지 링크'
+  const input = document.createElement('input')
+  input.type = 'url'
+  input.required = true
+  input.placeholder = 'https://workspace.slack.com/archives/…'
+  input.autocomplete = 'off'
+  label.append(input)
+  const hint = document.createElement('p')
+  hint.className = 'modal-hint'
+  hint.textContent = 'Slack에서 스레드의 메시지를 우클릭하고 “링크 복사”한 주소를 붙여넣으세요. 과거 내용은 한 번만 분석하고 이후 새 답글부터 추적합니다.'
+  const bar = document.createElement('div')
+  bar.className = 'modal-bar'
+  const status = document.createElement('span')
+  status.className = 'reply-status'
+  status.setAttribute('role', 'status')
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.textContent = '취소'
+  const submit = document.createElement('button')
+  submit.type = 'submit'
+  submit.className = 'primary'
+  submit.textContent = '추가 및 분석'
+  bar.append(status, cancel, submit)
+  box.append(title, label, hint, bar)
+  overlay.append(box)
+  document.body.append(overlay)
+
+  const dismiss = () => overlay.remove()
+  cancel.addEventListener('click', dismiss)
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) dismiss() })
+  box.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const permalink = input.value.trim()
+    if (!permalink) return
+    input.disabled = true
+    submit.disabled = true
+    status.textContent = '스레드 확인 중…'
+    try {
+      const result = await window.watchpup.threadImport(permalink)
+      pendingThreadImportId = result.id
+      importedThreadId = result.existing ? null : result.id
+      dismiss()
+      if (result.existing) {
+        pendingThreadImportId = null
+        await refresh()
+        select(result.id)
+        setThreadImportState('이미 추가된 스레드 · 추적 켜짐', 4000)
+        return
+      }
+      setThreadImportState('스레드를 가져오는 중…')
+      await refresh()
+      if (state.mentions.has(result.id)) {
+        pendingThreadImportId = null
+        select(result.id)
+        setThreadImportState('추가됨 · 분석 중')
+      }
+    } catch (error) {
+      input.disabled = false
+      submit.disabled = false
+      status.textContent = threadImportError(error)
+      input.focus()
+    }
+  })
+  requestAnimationFrame(() => input.focus())
+}
+
+if (threadImportButton) threadImportButton.addEventListener('click', openThreadImportModal)
 
 // 카테고리 필터(이슈/프로젝트/문의/잡담)
 document.querySelectorAll('.cat-chip').forEach((chip) => {

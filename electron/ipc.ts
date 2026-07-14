@@ -3,6 +3,7 @@ export const CMD = {
   mentionsList: 'mentions.list',
   mentionGet: 'mention.get',
   mentionRead: 'mention.read',
+  threadImport: 'thread.import',
   todoToggle: 'todo.toggle',
   replyApprove: 'reply.approve',
   replyCopy: 'reply.copy',
@@ -42,6 +43,11 @@ export const EVT = {
 export interface ChatSendArgs {
   mentionId: string
   text: string
+}
+
+export interface ThreadImportResult {
+  id: string
+  existing: boolean
 }
 
 export interface TodoToggleArgs {

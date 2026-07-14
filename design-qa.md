@@ -21,6 +21,16 @@
 
 final result: passed
 
+## Past Slack Thread Import
+
+- implementation: 멘션 목록의 `과거 Slack 스레드 추가` 버튼과 링크 입력 모달 (`.design-qa/thread-import-modal.png`, Git 제외)
+- viewport: 1180 x 760 Electron 렌더러
+- hierarchy: 목록 도구 영역에서 진입하고, 모달에서 링크·설명·취소·주요 행동을 한 번에 확인할 수 있음
+- behavior: 링크 확인 중 상태와 권한·채널 접근 오류를 모달 안에서 안내하며, 성공 시 가져온 항목을 자동 선택함
+- regression: 기존 검색·카테고리·할 일 필터는 같은 순서와 너비를 유지함
+
+final result: passed
+
 ## Long Chat Bubble Clamp
 
 - reference: 사용자가 제공한 긴 스트리밍 말풍선 캡처 (`codex-clipboard-c44923a3-f3bb-4c50-b965-968236036185.png`)

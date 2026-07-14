@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('watchpup', {
   mentionsList: () => ipcRenderer.invoke(CMD.mentionsList),
   mentionGet: (id: string) => ipcRenderer.invoke(CMD.mentionGet, id),
   mentionRead: (id: string) => ipcRenderer.invoke(CMD.mentionRead, id),
+  threadImport: (permalink: string) => ipcRenderer.invoke(CMD.threadImport, permalink),
   todoToggle: (id: string, index: number) => ipcRenderer.invoke(CMD.todoToggle, { mentionId: id, index }),
   replyApprove: (id: string) => ipcRenderer.invoke(CMD.replyApprove, id),
   replyCopy: (id: string) => ipcRenderer.invoke(CMD.replyCopy, id),

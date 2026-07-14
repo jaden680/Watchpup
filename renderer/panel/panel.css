@@ -239,6 +239,29 @@ html, body {
 }
 #list-search-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 #list-search-input::placeholder { color: var(--fg-faint); }
+.thread-import-row { margin-top: var(--sp-2); }
+#thread-import-open {
+  width: 100%;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-2);
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: var(--font-brand);
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+#thread-import-open:hover { color: var(--fg); border-color: var(--accent); background: var(--accent-soft); }
+#thread-import-open:disabled { cursor: default; opacity: 0.55; }
+#thread-import-state {
+  display: block;
+  min-height: 14px;
+  margin-top: 4px;
+  color: var(--fg-faint);
+  font-size: 10.5px;
+}
+#thread-import-state:empty { display: none; }
 
 /* 카테고리 필터 */
 #cat-filter { display: flex; flex-wrap: wrap; gap: 4px; margin-top: var(--sp-2); }
@@ -1800,6 +1823,7 @@ details.review .hint { margin: 0; }
 .modal-form label.checkbox { display: flex; flex-direction: row; align-items: center; gap: var(--sp-2); font-size: 12.5px; color: var(--fg); cursor: pointer; }
 .modal-form .modal-bar { align-items: center; }
 .modal-form .modal-bar .reply-status { margin-right: auto; }
+.modal-hint { margin: 0; color: var(--fg-faint); font-size: 11px; line-height: 1.45; }
 .modal-import { display: flex; }
 .modal-import .lesson-add { width: 100%; text-align: center; }
 

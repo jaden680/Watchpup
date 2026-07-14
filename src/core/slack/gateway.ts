@@ -26,6 +26,7 @@ import { SearchPoller, type RawMention } from './search-poller.js'
 import { ThreadFollowPoller } from './thread-poller.js'
 import { decideIngest } from './ingest-filter.js'
 import { compareSlackTs, latestSlackTs } from './timestamp.js'
+import { parseSlackThreadPermalink } from './permalink.js'
 import { threadText as buildThreadText, actionContext, devContext, devTitle } from '../watchpup/mention-context.js'
 
 export interface GatewayDeps {
@@ -40,6 +41,11 @@ export interface GatewayDeps {
   lessons: LessonStore
 }
 
+export interface ThreadImportResult {
+  id: string
+  existing: boolean
+}
+
 /**
  * 감지원 독립 엔진. 소켓(봇) / 검색 폴링(내 계정)을 attach로 붙이면 되고, 둘 다 붙여
  * 동시 사용 가능. 두 소스 모두 handleMention(raw, client)로 수렴한다.
@@ -52,6 +58,7 @@ export class WatchpupGateway extends EventEmitter {
   private userClient: WebClient | null = null
   private poller: SearchPoller | null = null
   private followPoller: ThreadFollowPoller | null = null
+  private pendingThreadImports = new Map<string, string>()
   /** 내가 속한 유저그룹 ID/핸들(@team) — attachUserSearch에서 usergroups.list로 채워짐(usergroups:read 필요) */
   private myGroupIds: string[] = []
   private groupHandles: string[] = []
@@ -99,6 +106,20 @@ export class WatchpupGateway extends EventEmitter {
   /** 쓰기 작업(답장·리액션)을 사용자 계정으로 실행할 수 있도록 User Token 클라이언트를 준비한다. */
   attachUserToken(userToken: string): void {
     this.userClient = new WebClient(userToken)
+    this.attachFollowPoller(this.userClient, this.cfg().mySlackUserId, this.cfg().searchIntervalSec)
+  }
+
+  private attachFollowPoller(client: WebClient, myUserId: string, intervalSec: number): void {
+    if (!this.cfg().followThreads || !myUserId || this.followPoller) return
+    this.followPoller = new ThreadFollowPoller(
+      client,
+      () => this.deps.state.trackedThreads(),
+      (channel, threadTs) => this.deps.state.getThreadCursor(threadKey(channel, threadTs)),
+      (channel, threadTs, ts) => this.deps.state.setThreadCursor(threadKey(channel, threadTs), ts),
+      myUserId,
+      intervalSec,
+      (raw) => { void this.handleMention(raw, client) },
+    )
   }
 
   /** 봇(소켓) 소스 부착 — 봇이 초대된 채널의 @나 멘션/스레드 후속을 즉시 감지 */
@@ -133,17 +154,65 @@ export class WatchpupGateway extends EventEmitter {
     }, this.groupHandles)
     this.applyGroupsFromConfig()
 
-    if (this.cfg().followThreads) {
-      this.followPoller = new ThreadFollowPoller(
-        client,
-        () => this.deps.state.trackedThreads(),
-        (channel, threadTs) => this.deps.state.getThreadCursor(threadKey(channel, threadTs)),
-        (channel, threadTs, ts) => this.deps.state.setThreadCursor(threadKey(channel, threadTs), ts),
-        myUserId,
-        intervalSec,
-        (raw) => { void this.handleMention(raw, client) },
-      )
+    this.attachFollowPoller(client, myUserId, intervalSec)
+  }
+
+  /** 사용자가 붙여넣은 과거 Slack 스레드를 나이·멘션 필터 없이 분석하고 추적한다. */
+  async importThread(permalink: string): Promise<ThreadImportResult> {
+    const target = parseSlackThreadPermalink(permalink)
+    const key = threadKey(target.channel, target.threadTs)
+    const linkedId = this.deps.state.mentionIdFor(key)
+    const existing = (linkedId ? this.deps.mentions.get(linkedId) : undefined)
+      ?? this.deps.mentions.all().find((mention) => mention.channel === target.channel && mention.threadTs === target.threadTs)
+    if (existing) {
+      if (existing.tracked === false || !linkedId) this.setTracked(existing.id, true)
+      return { id: existing.id, existing: true }
     }
+    if (linkedId) this.deps.state.unlinkThread(key)
+    const pendingId = this.pendingThreadImports.get(key)
+    if (pendingId) return { id: pendingId, existing: true }
+
+    const clients = [this.userClient, this.botClient].filter((client): client is WebClient => !!client)
+    if (!clients.length) throw new Error('Slack User Token 또는 Bot Token을 먼저 연결해주세요.')
+
+    let client: WebClient | null = null
+    let root: { ts?: string; user?: string; bot_id?: string; text?: string } | undefined
+    let firstError: unknown
+    for (const candidate of clients) {
+      try {
+        const response = await candidate.conversations.replies({
+          channel: target.channel,
+          ts: target.threadTs,
+          limit: 1,
+        })
+        root = response.messages?.[0] as typeof root
+        client = candidate
+        break
+      } catch (err) {
+        firstError ??= err
+      }
+    }
+    if (!client) throw firstError ?? new Error('Slack 스레드를 읽지 못했습니다.')
+    if (!root?.ts) throw new Error('Slack 스레드의 첫 메시지를 찾지 못했습니다.')
+
+    const id = randomUUID()
+    const raw: RawMention = {
+      channel: target.channel,
+      threadTs: target.threadTs,
+      messageTs: root.ts,
+      authorId: root.user || root.bot_id || '',
+      text: root.text || '(텍스트 없는 메시지)',
+      requestId: id,
+      permalink: permalink.trim(),
+    }
+    this.pendingThreadImports.set(key, id)
+    const job = this.deps.mutex.run(key, () => this.deps.semaphore.run(() => this.ingest(raw, client!)))
+    void job
+      .catch((err) => logger.error('수동 스레드 가져오기 실패', { channel: target.channel, threadTs: target.threadTs, err: String(err) }))
+      .finally(() => {
+        if (this.pendingThreadImports.get(key) === id) this.pendingThreadImports.delete(key)
+      })
+    return { id, existing: false }
   }
 
   /** 두 소스의 공통 진입점: 수집·필터(dedup·나이컷) → (필요 시) 스레드 root 해석 → 스레드별 직렬화 → 분석 */
@@ -199,14 +268,14 @@ export class WatchpupGateway extends EventEmitter {
     const tKey = threadKey(raw.channel, raw.threadTs)
     const existingId = this.deps.state.mentionIdFor(tKey)
     const isNew = !existingId
-    const id = existingId ?? randomUUID()
+    const id = existingId ?? raw.requestId ?? randomUUID()
     const myId = this.cfg().mySlackUserId
     try {
       const [thread, authorName, channelName, permalink, text] = await Promise.all([
         fetchThreadMessages(client, raw.channel, raw.threadTs, myId, { limit: this.cfg().threadFetchLimit }),
         resolveUserName(client, raw.authorId),
         resolveChannelName(client, raw.channel),
-        getPermalink(client, raw.channel, raw.messageTs),
+        raw.permalink ? Promise.resolve(raw.permalink) : getPermalink(client, raw.channel, raw.messageTs),
         resolveMentions(client, stripMention(raw.text, myId)).then((t) => resolveSubteams(client, t)).then(formatSlackPlain),
       ])
       const threadText = thread.map((m) => `${m.author}: ${m.text.replace(/\s+/g, ' ').trim()}`).join('\n')
@@ -228,7 +297,7 @@ export class WatchpupGateway extends EventEmitter {
         { ...placeholder, threadText: threadText || raw.text, mentionedAt: placeholder.mentionedAt,
           onEvent: (e) => this.emit('chat:stream', { mentionId: id, event: e, source: 'analysis' }) },
       )
-      mention.direct = !!raw.direct
+      if (typeof raw.direct === 'boolean') mention.direct = raw.direct
       mention.thread = thread
       this.deps.mentions.set(id, mention)
       saveMentionNote(this.cfg().obsidian, mention)
@@ -640,7 +709,7 @@ export class WatchpupGateway extends EventEmitter {
 
   /** 부착된 소스가 하나라도 있으면 true */
   hasSource(): boolean {
-    return !!this.app || !!this.poller
+    return !!this.app || !!this.poller || !!this.followPoller
   }
 
   async start(): Promise<void> {

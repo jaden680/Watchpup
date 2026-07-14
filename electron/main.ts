@@ -525,6 +525,10 @@ async function main(): Promise<void> {
     mentions.markRead(id)
     broadcastActivities()
   })
+  ipcMain.handle(CMD.threadImport, (_e, permalink: string) => {
+    if (!gateway) return Promise.reject(new Error('Slack 연결을 초기화하지 못했습니다.'))
+    return gateway.importThread(permalink)
+  })
   ipcMain.handle(CMD.todoToggle, (_e, a: TodoToggleArgs) => {
     gateway?.toggleTodo(a.mentionId, a.index)
   })
@@ -656,7 +660,7 @@ async function main(): Promise<void> {
     }
   } else {
     const missing: string[] = []
-    if (!gateway.hasSource()) missing.push('슬랙 연결(봇 토큰 또는 User Token+검색 활성화)')
+    if (!gateway.hasSource()) missing.push('슬랙 연결(봇 토큰 또는 User Token)')
     if (!config.mySlackUserId) missing.push('mySlackUserId')
     console.warn(`미설정 — Slack 감시 대기 중: ${missing.join(', ')}. 설정 탭에서 저장 후 앱 재시작.`)
   }

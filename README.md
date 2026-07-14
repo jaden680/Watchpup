@@ -78,12 +78,27 @@ oauth_config:
   scopes:
     user:
       - search:read          # 전 채널 멘션 검색(User Token)
+      - channels:history     # 공개 채널 스레드 읽기·후속 추적
+      - groups:history       # 비공개 채널 스레드 읽기·후속 추적
+      - im:history           # DM 스레드 읽기
+      - mpim:history         # 그룹 DM 스레드 읽기
+      - channels:read
+      - groups:read
+      - im:read
+      - mpim:read
+      - users:read
+      - usergroups:read
+      - reactions:read
+      - reactions:write
     bot:
       - channels:history
       - groups:history
       - im:history
+      - mpim:history
       - channels:read
       - groups:read
+      - im:read
+      - mpim:read
       - chat:write            # 승인한 답장 게시
       - users:read
       - usergroups:read       # 그룹(@subteam) 멘션 해석
