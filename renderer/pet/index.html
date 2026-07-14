@@ -14,8 +14,19 @@
       <div class="face">🐾</div>
       <span id="badge" class="badge hidden">0</span>
     </div>
+    <section id="activity-hud" class="activity-hud hidden" aria-label="최근 에이전트와 Slack 활동">
+      <button id="hud-fold" class="hud-fold" type="button" aria-expanded="true">
+        <span id="hud-fold-count" class="hud-fold-count">항목 0개</span>
+        <span id="hud-fold-action" class="hud-fold-action">접기</span>
+      </button>
+      <button id="hud-message" class="hud-message hidden" type="button" aria-live="polite">
+        <span class="hud-message-dot" aria-hidden="true"></span>
+        <span id="hud-message-text" class="hud-message-text"></span>
+      </button>
+      <div id="activity-list" class="activity-list"></div>
+    </section>
     <script src="themes.js"></script>
     <script src="codex.js"></script>
-    <script src="pet.js"></script>
+    <script type="module" src="pet.js"></script>
   </body>
 </html>

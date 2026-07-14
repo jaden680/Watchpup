@@ -1,4 +1,5 @@
 export const CMD = {
+  activityList: 'activity.list',
   mentionsList: 'mentions.list',
   mentionGet: 'mention.get',
   mentionRead: 'mention.read',
@@ -14,9 +15,11 @@ export const CMD = {
   playbookUpsert: 'playbook.upsert',
   playbookDelete: 'playbook.delete',
   actionRun: 'action.run',
+  reactionSet: 'reaction.set',
 } as const
 
 export const EVT = {
+  activitySessions: 'activity.sessions',
   pet: 'pet.state',
   mentionNew: 'mention.new',
   mentionReady: 'mention.ready',
@@ -27,6 +30,11 @@ export const EVT = {
   petTheme: 'pet.theme',
   petImages: 'pet.images',
   petCodex: 'pet.codex',
+  petSize: 'pet.size',
+  bubbleSize: 'bubble.size',
+  hudSize: 'hud.size',
+  hudAlignment: 'hud.alignment',
+  hudVisibility: 'hud.visibility',
   actionStream: 'action.stream',
   actionDone: 'action.done',
 } as const
@@ -39,6 +47,13 @@ export interface ChatSendArgs {
 export interface TodoToggleArgs {
   mentionId: string
   index: number
+}
+
+export interface ReactionSetArgs {
+  mentionId: string
+  messageTs: string
+  name: string
+  active: boolean
 }
 
 /** 액션(워크플로우) 정의 — src/core/config/schema.ts playbookSchema와 동일 형태 */
@@ -66,6 +81,11 @@ export interface SettingsPatch {
   ingestMaxAgeDays?: number
   petTheme?: string
   petAlwaysOnTop?: boolean
+  petSizePercent?: number
+  bubbleSizePercent?: number
+  hudSizePercent?: number
+  hudAlignment?: 'left' | 'right'
+  showActivityHud?: boolean
   petImageDir?: string
   petCodexDir?: string
   persona?: string

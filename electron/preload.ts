@@ -9,6 +9,11 @@ function sub(channel: string, cb: (payload: unknown) => void): () => void {
 }
 
 contextBridge.exposeInMainWorld('watchpup', {
+  activityList: (range = 'recent') => ipcRenderer.invoke(CMD.activityList, range),
+  onActivitySessions: (cb: (sessions: unknown) => void) => sub(EVT.activitySessions, cb),
+  onActivityFocus: (cb: (id: unknown) => void) => sub('activity.focus', cb),
+  openActivity: (id: string) => ipcRenderer.send('activity.open', id),
+  openActivityDetail: (id?: string) => ipcRenderer.send('activity.detail', id),
   mentionsList: () => ipcRenderer.invoke(CMD.mentionsList),
   mentionGet: (id: string) => ipcRenderer.invoke(CMD.mentionGet, id),
   mentionRead: (id: string) => ipcRenderer.invoke(CMD.mentionRead, id),
@@ -42,6 +47,11 @@ contextBridge.exposeInMainWorld('watchpup', {
   onChatBubble: (cb: (ev: unknown) => void) => sub(EVT.chatBubble, cb),
   onPetTheme: (cb: (name: unknown) => void) => sub(EVT.petTheme, cb),
   onPetImages: (cb: (map: unknown) => void) => sub(EVT.petImages, cb),
+  onPetSize: (cb: (value: unknown) => void) => sub(EVT.petSize, cb),
+  onBubbleSize: (cb: (value: unknown) => void) => sub(EVT.bubbleSize, cb),
+  onHudSize: (cb: (value: unknown) => void) => sub(EVT.hudSize, cb),
+  onHudAlignment: (cb: (value: unknown) => void) => sub(EVT.hudAlignment, cb),
+  onHudVisibility: (cb: (value: unknown) => void) => sub(EVT.hudVisibility, cb),
   petImages: () => ipcRenderer.invoke('pet.images.get'),
   pickPetImageDir: () => ipcRenderer.invoke('pet.pickImageDir'),
   pickObsidianVault: () => ipcRenderer.invoke('obsidian.pickVault'),
@@ -50,7 +60,9 @@ contextBridge.exposeInMainWorld('watchpup', {
   codexPickDir: () => ipcRenderer.invoke('codex.pickDir'),
   codexUse: (dir: string) => ipcRenderer.invoke('codex.use', dir),
   petCodex: () => ipcRenderer.invoke('pet.codex.get'),
-  threadGet: (id: string) => ipcRenderer.invoke('thread.get', id),
+  threadGet: (id: string, refresh = false) => ipcRenderer.invoke('thread.get', id, refresh),
+  reactionSet: (mentionId: string, messageTs: string, name: string, active: boolean) =>
+    ipcRenderer.invoke(CMD.reactionSet, { mentionId, messageTs, name, active }),
   groupsList: () => ipcRenderer.invoke('groups.list'),
   groupsResearch: () => ipcRenderer.invoke('groups.research'),
   groupsRemove: (id: string) => ipcRenderer.invoke('groups.remove', id),
@@ -70,7 +82,12 @@ contextBridge.exposeInMainWorld('watchpup', {
   lessonsEdit: (key: string, index: number, text: string) => ipcRenderer.invoke('lessons.edit', { key, index, text }),
   onLessonsChanged: (cb: () => void) => sub('lessons.changed', () => cb()),
   onPetCodex: (cb: (v: unknown) => void) => sub(EVT.petCodex, cb),
-  petResize: (height: number) => ipcRenderer.send('pet.resize', height),
+  petResize: (size: number | {
+    width: number
+    height: number
+    anchor?: 'left' | 'right'
+    verticalAnchor?: 'top' | 'bottom'
+  }) => ipcRenderer.send('pet.resize', size),
   onActionStream: (cb: (p: unknown) => void) => sub(EVT.actionStream, cb),
   onActionDone: (cb: (p: unknown) => void) => sub(EVT.actionDone, cb),
   openExternal: (url: string) => ipcRenderer.send('open.external', url),
@@ -85,7 +102,7 @@ contextBridge.exposeInMainWorld('watchpup', {
   cleanupFalseMentions: () => ipcRenderer.invoke('mention.cleanupFalse'),
   setCategory: (mentionId: string, category: string) => ipcRenderer.invoke('mention.setCategory', { mentionId, category }),
   restartApp: () => ipcRenderer.send('app.restart'),
-  togglePanel: () => ipcRenderer.send('pet.togglePanel'),
+  showPanel: () => ipcRenderer.send('pet.showPanel'),
   setMouseIgnore: (ignore: boolean) => ipcRenderer.send('pet.setMouseIgnore', ignore),
   petDragStart: () => ipcRenderer.send('pet.dragStart'),
   petDragEnd: () => ipcRenderer.send('pet.dragEnd'),

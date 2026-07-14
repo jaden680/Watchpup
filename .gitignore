@@ -3,6 +3,7 @@ data
 *.log
 dist
 out
+.design-qa/
 
 watchpup.config.yaml
 .superpowers

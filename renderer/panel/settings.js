@@ -18,6 +18,8 @@ oauth_config:
   scopes:
     user:
       - search:read          # 전 채널 멘션 검색(User Token)
+      - reactions:read       # 메시지 리액션 조회
+      - reactions:write      # 내 계정으로 리액션 추가·취소
     bot:
       - channels:history
       - groups:history
@@ -105,6 +107,41 @@ showSset('detect')
 // ---- 설정 ----
 const settingsForm = document.getElementById('settings-form')
 const settingsStatus = document.getElementById('settings-status')
+const petSizeInput = settingsForm.elements['petSizePercent']
+const petSizeValue = document.getElementById('pet-size-value')
+const bubbleSizeInput = settingsForm.elements['bubbleSizePercent']
+const bubbleSizeValue = document.getElementById('bubble-size-value')
+const hudSizeInput = settingsForm.elements['hudSizePercent']
+const hudSizeValue = document.getElementById('hud-size-value')
+const showActivityHudInput = settingsForm.elements['showActivityHud']
+const hudSizeField = document.getElementById('hud-size-field')
+const hudAlignmentInput = settingsForm.elements['hudAlignment']
+const hudAlignmentField = document.getElementById('hud-alignment-field')
+
+function updatePetSizeLabel() {
+  if (petSizeInput && petSizeValue) petSizeValue.textContent = `${petSizeInput.value}%`
+}
+
+function updateBubbleSizeLabel() {
+  if (bubbleSizeInput && bubbleSizeValue) bubbleSizeValue.textContent = `${bubbleSizeInput.value}%`
+}
+
+function updateHudSizeLabel() {
+  if (hudSizeInput && hudSizeValue) hudSizeValue.textContent = `${hudSizeInput.value}%`
+}
+
+function updateHudControls() {
+  const enabled = showActivityHudInput?.checked !== false
+  if (hudSizeInput) hudSizeInput.disabled = !enabled
+  if (hudAlignmentInput) hudAlignmentInput.disabled = !enabled
+  if (hudSizeField) hudSizeField.classList.toggle('is-disabled', !enabled)
+  if (hudAlignmentField) hudAlignmentField.classList.toggle('is-disabled', !enabled)
+}
+
+if (petSizeInput) petSizeInput.addEventListener('input', updatePetSizeLabel)
+if (bubbleSizeInput) bubbleSizeInput.addEventListener('input', updateBubbleSizeLabel)
+if (hudSizeInput) hudSizeInput.addEventListener('input', updateHudSizeLabel)
+if (showActivityHudInput) showActivityHudInput.addEventListener('change', updateHudControls)
 
 async function loadSettings() {
   const cfg = await window.watchpup.settingsGet()
@@ -112,6 +149,15 @@ async function loadSettings() {
   settingsForm.elements['followThreads'].checked = !!cfg.followThreads
   settingsForm.elements['petTheme'].value = cfg.petTheme || 'paw'
   if (settingsForm.elements['petAlwaysOnTop']) settingsForm.elements['petAlwaysOnTop'].checked = cfg.petAlwaysOnTop !== false
+  if (petSizeInput) petSizeInput.value = String(cfg.petSizePercent ?? 100)
+  if (bubbleSizeInput) bubbleSizeInput.value = String(cfg.bubbleSizePercent ?? 100)
+  if (hudSizeInput) hudSizeInput.value = String(cfg.hudSizePercent ?? 100)
+  if (hudAlignmentInput) hudAlignmentInput.value = cfg.hudAlignment === 'left' ? 'left' : 'right'
+  if (showActivityHudInput) showActivityHudInput.checked = cfg.showActivityHud !== false
+  updatePetSizeLabel()
+  updateBubbleSizeLabel()
+  updateHudSizeLabel()
+  updateHudControls()
   if (settingsForm.elements['persona']) settingsForm.elements['persona'].value = cfg.persona || ''
   if (settingsForm.elements['bubbleStyle']) settingsForm.elements['bubbleStyle'].value = cfg.bubbleStyle || 'status'
   const petimgPathEl = document.getElementById('petimg-path')
@@ -480,6 +526,11 @@ settingsForm.addEventListener('submit', async (e) => {
     followThreads: settingsForm.elements['followThreads'].checked,
     petTheme: settingsForm.elements['petTheme'].value,
     petAlwaysOnTop: settingsForm.elements['petAlwaysOnTop'] ? settingsForm.elements['petAlwaysOnTop'].checked : true,
+    petSizePercent: petSizeInput ? parseInt(petSizeInput.value, 10) : 100,
+    bubbleSizePercent: bubbleSizeInput ? parseInt(bubbleSizeInput.value, 10) : 100,
+    hudSizePercent: hudSizeInput ? parseInt(hudSizeInput.value, 10) : 100,
+    hudAlignment: hudAlignmentInput?.value === 'left' ? 'left' : 'right',
+    showActivityHud: showActivityHudInput ? showActivityHudInput.checked : true,
     persona: settingsForm.elements['persona'] ? settingsForm.elements['persona'].value.trim() : '',
     bubbleStyle: settingsForm.elements['bubbleStyle'] ? settingsForm.elements['bubbleStyle'].value : 'status',
     enableBot: settingsForm.elements['enableBot'].checked,

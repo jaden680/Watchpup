@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -36,5 +36,25 @@ describe('WatchpupGateway.toggleTodo', () => {
     })
     gw.toggleTodo('m1', 0)
     expect(mentions.get('m1')!.todos[0].done).toBe(true)
+  })
+})
+
+describe('WatchpupGateway.setReaction', () => {
+  it('adds a reaction through the user client and updates the cached thread', async () => {
+    const { gw, mentions } = make()
+    const add = vi.fn().mockResolvedValue({ ok: true })
+    ;(gw as unknown as { userClient: { reactions: { add: typeof add; remove: ReturnType<typeof vi.fn> } } }).userClient = {
+      reactions: { add, remove: vi.fn() },
+    }
+    mentions.set('m1', {
+      id: 'm1', channel: 'C1', threadTs: '1', messageTs: '1', authorId: 'U9', text: 't',
+      mentionedAt: 0, status: 'ready', todos: [],
+      thread: [{ author: 'Kim', text: 'hello', mine: false, ts: '1.1', reactions: [] }],
+    })
+
+    const result = await gw.setReaction('m1', '1.1', 'eyes', true)
+
+    expect(add).toHaveBeenCalledWith({ channel: 'C1', timestamp: '1.1', name: 'eyes' })
+    expect(result.thread[0].reactions).toEqual([{ name: 'eyes', count: 1, reacted: true }])
   })
 })

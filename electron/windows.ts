@@ -30,10 +30,9 @@ export function createPetWindow(alwaysOnTop = true): BrowserWindow {
     resizable: false,
     skipTaskbar: true,
     fullscreenable: false,
-    // 항상 위에 떠 있는 장식용 오버레이 창 — 리사이즈(pet.resize)나 마우스 진입 시
-    // ignoreMouseEvents 해제(setMouseIgnore)만으로 macOS가 키 윈도우로 승격시켜
-    // 사용자가 보던 앱의 포커스를 뺏어가는 문제가 있었다. focusable: false로
-    // 키 윈도우가 될 수 없게 하면 클릭/호버 이벤트는 그대로 받으면서 포커스는 뺏지 않는다.
+    // macOS NSWindowStyleMaskNonactivatingPanel: 펫 클릭은 Watchpup 앱 자체를
+    // 활성화하지 않는다. 실제 패널 포커스는 더블클릭 IPC에서만 요청한다.
+    ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
     focusable: false,
     webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: false },
   })

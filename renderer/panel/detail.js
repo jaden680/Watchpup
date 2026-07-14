@@ -5,6 +5,7 @@ import { state, nav, getChat, getActionLog } from './store.js'
 import { STATUS_LABEL, CAT_LABEL, CAT_ORDER, shortText, shortRef, debugRef, fmtMsgTime, authorColor } from './format.js'
 import { copyToClipboard, appendLinkified } from './richtext.js'
 import { playbooks, playbookById } from './playbooks.js'
+import { agentScrollTop } from './agent-scroll.js'
 
 const detailEl = document.getElementById('detail') // #detail — 상세 렌더 대상
 
@@ -139,6 +140,111 @@ function renderDetail(m) {
   attachSplitter(panes, left, right, divider)
 }
 
+function renderActivityDetail(activity, targetEl = detailEl) {
+  const previousBody = targetEl.querySelector('.agent-session-body')
+  const previousScroll = previousBody
+    ? {
+        sameActivity: targetEl.dataset.activityId === activity.id,
+        previousTop: previousBody.scrollTop,
+        previousHeight: previousBody.scrollHeight,
+        previousClientHeight: previousBody.clientHeight,
+      }
+    : {
+        sameActivity: false,
+        previousTop: 0,
+        previousHeight: 0,
+        previousClientHeight: 0,
+      }
+  targetEl.replaceChildren()
+  targetEl.dataset.activityId = activity.id
+  const sourceName = activity.source === 'claude' ? 'Claude' : 'Codex'
+  const stateLabels = { running: '진행 중', done: '완료', waiting: '대기', error: '오류' }
+
+  const head = document.createElement('div')
+  head.className = 'detail-head agent-detail-head'
+  const row = document.createElement('div')
+  row.className = 'head-row'
+  const where = document.createElement('div')
+  where.className = 'where'
+  const source = document.createElement('b')
+  source.textContent = `${sourceName} 로컬 세션`
+  where.append(source)
+  const right = document.createElement('div')
+  right.className = 'head-right'
+  const open = document.createElement('button')
+  open.type = 'button'
+  open.className = 'reanalyze-btn'
+  open.textContent = `↗ ${sourceName}에서 열기`
+  open.disabled = activity.canOpen === false
+  open.addEventListener('click', () => window.watchpup.openActivity(activity.id))
+  const pill = document.createElement('span')
+  pill.className = `status-pill ${activity.state || 'waiting'}`
+  pill.textContent = stateLabels[activity.state] || activity.state || '대기'
+  right.append(open, pill)
+  row.append(where, right)
+  head.append(row)
+
+  const meta = document.createElement('div')
+  meta.className = 'agent-session-meta'
+  const updated = Number(activity.updatedAt)
+  const parts = [Number.isFinite(updated) ? `최근 갱신 ${new Date(updated).toLocaleString('ko-KR')}` : '']
+  if (Number.isFinite(activity.contextPercent)) parts.push(`컨텍스트 ${Math.round(activity.contextPercent)}%`)
+  parts.push(`세션 ${activity.sessionId || ''}`)
+  meta.textContent = parts.filter(Boolean).join(' · ')
+  head.append(meta)
+  targetEl.append(head)
+
+  const body = document.createElement('div')
+  body.className = 'agent-session-body'
+  const title = document.createElement('h1')
+  title.className = 'agent-session-title'
+  title.textContent = activity.title || `${sourceName} 세션`
+  body.append(title)
+
+  const messages = Array.isArray(activity.messages) ? activity.messages : []
+  if (messages.length) {
+    const label = document.createElement('div')
+    label.className = 'agent-session-section-title'
+    label.textContent = `최근 대화 ${messages.length}개`
+    body.append(label)
+    const transcript = document.createElement('div')
+    transcript.className = 'agent-session-transcript'
+    for (const message of messages) {
+      if (!message || typeof message.text !== 'string' || !message.text) continue
+      const card = document.createElement('article')
+      card.className = `agent-session-message ${message.role === 'user' ? 'user' : 'assistant'}`
+      const messageHead = document.createElement('div')
+      messageHead.className = 'agent-session-message-head'
+      const role = document.createElement('b')
+      role.textContent = message.role === 'user' ? '사용자' : sourceName
+      const at = document.createElement('span')
+      at.textContent = Number.isFinite(message.at)
+        ? new Date(message.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+        : ''
+      messageHead.append(role, at)
+      const content = document.createElement('pre')
+      content.textContent = message.text
+      card.append(messageHead, content)
+      transcript.append(card)
+    }
+    body.append(transcript)
+  } else {
+    const summary = document.createElement('pre')
+    summary.className = 'agent-session-summary'
+    summary.textContent = activity.detail || '아직 표시할 대화 내용이 없습니다.'
+    body.append(summary)
+  }
+  targetEl.append(body)
+  const restoreScroll = () => {
+    body.scrollTop = agentScrollTop({
+      ...previousScroll,
+      nextHeight: body.scrollHeight,
+    })
+  }
+  restoreScroll()
+  requestAnimationFrame(restoreScroll)
+}
+
 // 좌우 비율(스레드:watchpup) 저장·복원 + 드래그 리사이즈
 const SPLIT_KEY = 'watchpup.splitRatio'
 function getSplitRatio() {
@@ -181,6 +287,77 @@ function attachSplitter(container, left, right, divider) {
 
 // 평문에서 URL(클릭) · @멘션 · #채널을 색으로 강조. 안전: 노드 조립(innerHTML 미사용).
 
+const REACTION_CHOICES = [
+  ['eyes', '👀'],
+  ['white_check_mark', '✅'],
+  ['+1', '👍'],
+  ['heart', '❤️'],
+  ['pray', '🙏'],
+  ['tada', '🎉'],
+]
+const REACTION_EMOJI = new Map(REACTION_CHOICES)
+
+function reactionLabel(name) {
+  return REACTION_EMOJI.get(name) || `:${name}:`
+}
+
+async function changeReaction(mention, msg, name, active, button, errorEl) {
+  if (!msg.ts || button.disabled) return
+  button.disabled = true
+  errorEl.textContent = ''
+  try {
+    const result = await window.watchpup.reactionSet(mention.id, msg.ts, name, active)
+    if (Array.isArray(result?.thread)) mention.thread = result.thread
+    if (state.current === mention.id) renderDetail(mention)
+  } catch (error) {
+    console.error('reactionSet 실패', error)
+    button.disabled = false
+    errorEl.textContent = '리액션 권한을 확인해 주세요'
+  }
+}
+
+function renderReactions(mention, msg) {
+  if (!msg.ts) return null
+  const wrap = document.createElement('div')
+  wrap.className = 'treactions'
+  const error = document.createElement('span')
+  error.className = 'treaction-error'
+
+  for (const reaction of msg.reactions || []) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'treaction' + (reaction.reacted ? ' active' : '')
+    button.textContent = `${reactionLabel(reaction.name)} ${reaction.count}`
+    button.title = reaction.reacted ? '내 리액션 취소' : '리액션 추가'
+    button.addEventListener('click', () => {
+      changeReaction(mention, msg, reaction.name, !reaction.reacted, button, error)
+    })
+    wrap.appendChild(button)
+  }
+
+  const add = document.createElement('details')
+  add.className = 'treaction-add'
+  const summary = document.createElement('summary')
+  summary.textContent = '+'
+  summary.title = '리액션 추가'
+  const picker = document.createElement('div')
+  picker.className = 'treaction-picker'
+  for (const [name, emoji] of REACTION_CHOICES) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = emoji
+    button.title = `:${name}:`
+    button.addEventListener('click', () => {
+      add.open = false
+      changeReaction(mention, msg, name, true, button, error)
+    })
+    picker.appendChild(button)
+  }
+  add.append(summary, picker)
+  wrap.append(add, error)
+  return wrap
+}
+
 function renderThreadPane(m) {
   const pane = document.createElement('div')
   pane.className = 'thread-pane'
@@ -206,6 +383,17 @@ function renderThreadPane(m) {
       })
     return pane
   }
+  // 저장된 과거 스레드도 상세 화면을 처음 열 때 한 번 갱신해 리액션을 채운다.
+  if (!m.reactionsLoaded) {
+    m.reactionsLoaded = true
+    window.watchpup
+      .threadGet(m.id, true)
+      .then((msgs) => {
+        if (Array.isArray(msgs)) m.thread = msgs
+        if (state.current === m.id) renderDetail(m)
+      })
+      .catch((error) => console.error('리액션 포함 스레드 새로고침 실패', error))
+  }
   for (const msg of thread) {
     const row = document.createElement('div')
     row.className = 'tmsg' + (msg.mine ? ' mine' : '')
@@ -229,6 +417,8 @@ function renderThreadPane(m) {
     if (col) text.style.borderLeftColor = col
     appendLinkified(text, msg.text || '')
     row.append(author, text)
+    const reactions = renderReactions(m, msg)
+    if (reactions) row.appendChild(reactions)
     pane.appendChild(row)
   }
   // 새 창/재렌더 시 가장 최근 메시지(맨 아래)로 스크롤
@@ -886,6 +1076,6 @@ window.watchpup.onActionDone(({ mentionId, playbookId, text, error }) => {
 })
 
 // 다른 모듈이 순환 import 없이 쓰도록 등록
-Object.assign(nav, { renderDetail, runAction })
+Object.assign(nav, { renderDetail, renderActivityDetail, runAction })
 
-export { renderDetail, runAction }
+export { renderActivityDetail, renderDetail, runAction }
