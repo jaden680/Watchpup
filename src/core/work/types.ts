@@ -12,6 +12,8 @@ export interface ReminderListRef {
   id: string
   name: string
   account: string
+  openCount?: number
+  totalCount?: number
 }
 
 export interface WorkItem {
@@ -27,4 +29,3 @@ export interface WorkItem {
   updatedAt?: number
   links: WorkLink[]
 }
-

@@ -249,8 +249,14 @@ export async function initWorkView() {
   try {
     const result = await window.watchpup.workLists()
     listSelect.replaceChildren()
+    const placeholder = el('option', '', '미리 알림 목록 선택')
+    placeholder.value = ''
+    placeholder.selected = !result.selectedId
+    placeholder.disabled = true
+    listSelect.append(placeholder)
     for (const list of result.lists || []) {
-      const option = el('option', '', `${list.name} · ${list.account}`)
+      const count = Number.isFinite(list.openCount) ? ` · ${list.openCount}개` : ''
+      const option = el('option', '', `${list.name} · ${list.account}${count}`)
       option.value = list.id
       option.selected = list.id === result.selectedId
       listSelect.append(option)
@@ -259,8 +265,10 @@ export async function initWorkView() {
       hintEl.textContent = '사용 가능한 Reminder 목록이 없습니다.'
       return
     }
-    hintEl.textContent = 'Watchpup에서 사용할 Reminder 목록을 선택할 수 있습니다.'
-    await refreshWorkView()
+    hintEl.textContent = result.selectedId
+      ? '선택한 미리 알림 목록과 동기화합니다.'
+      : `${result.lists.length}개 목록을 찾았습니다. 사용할 목록을 선택해주세요.`
+    if (result.selectedId) await refreshWorkView()
   } catch (error) {
     hintEl.textContent = error?.message || 'Reminder 목록을 읽지 못했습니다.'
   }

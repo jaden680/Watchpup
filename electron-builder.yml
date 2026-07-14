@@ -6,10 +6,16 @@ files:
   - dist/electron/**
   - renderer/**
   - package.json
-asarUnpack:
-  - "**/node_modules/@napi-rs/keyring/**"
+extraResources:
+  - from: dist/native/watchpup-reminders
+    to: watchpup-reminders
 mac:
+  extendInfo:
+    NSRemindersFullAccessUsageDescription: Watchpup에서 선택한 미리 알림 목록과 업무 링크를 표시하고 관리합니다.
+    NSRemindersUsageDescription: Watchpup에서 선택한 미리 알림 목록과 업무 링크를 표시하고 관리합니다.
   target: dmg
   category: public.app-category.productivity
   icon: build/icon.png
+asarUnpack:
+  - "**/node_modules/@napi-rs/keyring/**"
 publish: null

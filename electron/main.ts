@@ -97,15 +97,9 @@ async function main(): Promise<void> {
   ipcMain.handle(CMD.workLists, async () => {
     const lists = await reminders.lists()
     const current = configStore.get()
-    const selected = lists.find((list) => list.id === current.reminderListId)
-      ?? lists[0]
-    if (selected && selected.id !== current.reminderListId) {
-      deps.config = configStore.update({
-        reminderListId: selected.id,
-        reminderListName: selected.name,
-        reminderAccountName: selected.account,
-      })
-    }
+    const selected = current.reminderListSelectionExplicit
+      ? lists.find((list) => list.id === current.reminderListId)
+      : undefined
     return { lists, selectedId: selected?.id ?? '' }
   })
   ipcMain.handle(CMD.workItems, async (_e, args: { listId?: string; includeCompleted?: boolean } = {}) => {
@@ -121,6 +115,7 @@ async function main(): Promise<void> {
       reminderListId: selected.id,
       reminderListName: selected.name,
       reminderAccountName: selected.account,
+      reminderListSelectionExplicit: true,
     })
     return selected
   })

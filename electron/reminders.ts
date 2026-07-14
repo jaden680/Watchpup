@@ -1,22 +1,41 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { parseWorkLinks } from '../src/core/work/links.js'
 import type { ReminderListRef, WorkItem } from '../src/core/work/types.js'
 
 const execFileAsync = promisify(execFile)
 
-export type ReminderScriptRunner = (script: string) => Promise<string>
+export type ReminderCommand = 'lists' | 'tasks' | 'set-completed' | 'append-link'
+export type ReminderCommandRunner = (command: ReminderCommand, args: string[]) => Promise<string>
 
-const defaultRunner: ReminderScriptRunner = async (script) => {
-  const { stdout } = await execFileAsync('osascript', ['-l', 'JavaScript', '-e', script], {
-    timeout: 30_000,
-    maxBuffer: 16 * 1024 * 1024,
-  })
-  return stdout.trim()
+function resolveHelperPath(): string {
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+  const candidates = [
+    process.env.WATCHPUP_REMINDERS_HELPER,
+    resourcesPath ? join(resourcesPath, 'watchpup-reminders') : '',
+    join(process.cwd(), 'dist', 'native', 'watchpup-reminders'),
+    typeof __dirname === 'string' ? join(__dirname, '..', 'native', 'watchpup-reminders') : '',
+  ].filter((candidate): candidate is string => Boolean(candidate))
+  const helper = candidates.find((candidate) => existsSync(candidate))
+  if (!helper) throw new Error('Watchpup Reminders helper를 찾지 못했습니다. npm run build:app을 실행해주세요.')
+  return helper
 }
 
-function js(value: string): string {
-  return JSON.stringify(value)
+const defaultRunner: ReminderCommandRunner = async (command, args) => {
+  try {
+    const { stdout } = await execFileAsync(resolveHelperPath(), [command, ...args], {
+      timeout: 30_000,
+      maxBuffer: 16 * 1024 * 1024,
+    })
+    return stdout.trim()
+  } catch (error) {
+    const stderr = typeof (error as { stderr?: unknown }).stderr === 'string'
+      ? (error as { stderr: string }).stderr.trim()
+      : ''
+    throw new Error(stderr || (error instanceof Error ? error.message : '미리 알림 helper 실행에 실패했습니다.'))
+  }
 }
 
 function dateMs(value: unknown): number | undefined {
@@ -26,40 +45,16 @@ function dateMs(value: unknown): number | undefined {
 }
 
 export class ReminderGateway {
-  constructor(private readonly runScript: ReminderScriptRunner = defaultRunner) {}
+  constructor(private readonly runCommand: ReminderCommandRunner = defaultRunner) {}
 
   async lists(): Promise<ReminderListRef[]> {
-    const raw = await this.runScript(`
-      const app = Application('Reminders');
-      const rows = [];
-      for (const account of app.accounts()) {
-        for (const list of account.lists()) rows.push({ id: list.id(), name: list.name(), account: account.name() });
-      }
-      JSON.stringify(rows);
-    `)
+    const raw = await this.runCommand('lists', [])
     const rows = JSON.parse(raw || '[]') as ReminderListRef[]
     return rows.sort((a, b) => `${a.account}/${a.name}`.localeCompare(`${b.account}/${b.name}`))
   }
 
   async tasks(listId: string, includeCompleted = false): Promise<WorkItem[]> {
-    const raw = await this.runScript(`
-      const app = Application('Reminders');
-      const targetId = ${js(listId)};
-      let target = null, accountName = '';
-      for (const account of app.accounts()) for (const list of account.lists()) {
-        if (list.id() === targetId) { target = list; accountName = account.name(); }
-      }
-      if (!target) throw new Error('선택한 Reminder 목록을 찾지 못했습니다.');
-      const value = (read, fallback = null) => { try { const result = read(); return result == null ? fallback : result; } catch (_) { return fallback; } };
-      const iso = (read) => { const d = value(read); return d && typeof d.toISOString === 'function' ? d.toISOString() : null; };
-      const rows = target.reminders().map((reminder) => ({
-        id: reminder.id(), name: value(() => reminder.name(), ''), body: value(() => reminder.body(), ''),
-        completed: Boolean(value(() => reminder.completed(), false)),
-        dueAt: iso(() => reminder.dueDate()), createdAt: iso(() => reminder.creationDate()), updatedAt: iso(() => reminder.modificationDate()),
-        listId: targetId, listName: target.name(), account: accountName,
-      }));
-      JSON.stringify(rows);
-    `)
+    const raw = await this.runCommand('tasks', [listId, String(includeCompleted)])
     const rows = JSON.parse(raw || '[]') as Array<Record<string, unknown>>
     return rows
       .filter((row) => includeCompleted || row.completed !== true)
@@ -83,36 +78,13 @@ export class ReminderGateway {
   }
 
   async setCompleted(reminderId: string, completed: boolean): Promise<void> {
-    await this.runScript(`
-      const app = Application('Reminders');
-      const targetId = ${js(reminderId)};
-      let target = null;
-      for (const account of app.accounts()) for (const list of account.lists()) for (const reminder of list.reminders()) {
-        if (reminder.id() === targetId) target = reminder;
-      }
-      if (!target) throw new Error('Reminder를 찾지 못했습니다.');
-      target.completed = ${completed ? 'true' : 'false'};
-      JSON.stringify({ ok: true });
-    `)
+    await this.runCommand('set-completed', [reminderId, String(completed)])
   }
 
   async appendLink(reminderId: string, title: string, url: string): Promise<void> {
     const parsed = new URL(url)
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('http 또는 https 링크만 추가할 수 있습니다.')
     const safeTitle = title.trim().replace(/[\[\]]/g, '') || parsed.hostname
-    const markdown = `[${safeTitle}](${parsed.toString()})`
-    await this.runScript(`
-      const app = Application('Reminders');
-      const targetId = ${js(reminderId)};
-      let target = null;
-      for (const account of app.accounts()) for (const list of account.lists()) for (const reminder of list.reminders()) {
-        if (reminder.id() === targetId) target = reminder;
-      }
-      if (!target) throw new Error('Reminder를 찾지 못했습니다.');
-      const before = (() => { try { return target.body() || ''; } catch (_) { return ''; } })();
-      const link = ${js(markdown)};
-      if (!before.includes(${js(parsed.toString())})) target.body = before ? before.replace(/\s+$/, '') + '\n' + link : link;
-      JSON.stringify({ ok: true });
-    `)
+    await this.runCommand('append-link', [reminderId, safeTitle, parsed.toString()])
   }
 }
