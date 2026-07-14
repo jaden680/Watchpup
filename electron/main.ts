@@ -86,6 +86,13 @@ async function main(): Promise<void> {
     mentions,
     lessons,
   }
+
+  // 렌더러가 창 로드 직후 요청하는 초기 설정 핸들러는 창을 만들기 전에 등록한다.
+  // 늦게 등록하면 첫 요청이 실패한 뒤 기본 UI 값(100%)이 그대로 남을 수 있다.
+  ipcMain.handle(CMD.settingsGet, () => configStore.get())
+  ipcMain.handle('pet.images.get', () => petImagesFromDir(configStore.get().petImageDir))
+  ipcMain.handle('pet.codex.get', () => resolveCodexPet(configStore.get().petCodexDir))
+
   let localActivities: ActivitySession[] = []
   const currentActivities = (): ActivitySession[] => mergeActivities(localActivities, slackActivities(mentions.all()))
   const broadcastActivities = (): void => {
@@ -282,7 +289,6 @@ async function main(): Promise<void> {
     return dest
   }
 
-  ipcMain.handle('pet.images.get', () => petImagesFromDir(configStore.get().petImageDir))
   ipcMain.handle('obsidian.pickVault', async () => {
     const r = await dialog.showOpenDialog({ properties: ['openDirectory'] })
     return r.canceled ? null : r.filePaths[0]
@@ -327,7 +333,6 @@ async function main(): Promise<void> {
       return null
     }
   })
-  ipcMain.handle('pet.codex.get', () => resolveCodexPet(configStore.get().petCodexDir))
   // 스레드 대화 즉석 조회(예전 멘션은 thread가 없을 수 있음)
   ipcMain.handle('thread.get', (_e, id: string, refresh = false) =>
     gateway ? gateway.getThread(id, !!refresh) : Promise.resolve([]),
@@ -563,7 +568,6 @@ async function main(): Promise<void> {
     send(pet, EVT.chatBubble, { type: 'start' })
     return gateway.chat(a.mentionId, a.text)
   })
-  ipcMain.handle(CMD.settingsGet, () => configStore.get())
   ipcMain.handle(CMD.settingsSet, (_e, patch: SettingsPatch) => {
     const current = configStore.get()
     const merged = {
