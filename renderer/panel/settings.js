@@ -249,6 +249,9 @@ document.getElementById('jira-connect')?.addEventListener('click', async () => {
     msg.textContent = verified.jira.authenticated ? '연결됨' : (verified.jira.error || '인증 확인 실패')
   } catch (e) { msg.textContent = '실패: ' + (e?.message || e) }
 })
+document.getElementById('jira-token-page')?.addEventListener('click', () => {
+  window.watchpup.openExternal('https://id.atlassian.com/manage-profile/security/api-tokens')
+})
 document.getElementById('jira-disconnect')?.addEventListener('click', async () => {
   if (!confirm('Jira 연동을 해제할까요?')) return
   await window.watchpup.disconnectIntegration('jira')
