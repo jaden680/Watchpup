@@ -179,11 +179,18 @@ async function main(): Promise<void> {
     if (process.platform === 'darwin') app.dock?.setBadge('')
   }
 
+  function activatePanel(win: BrowserWindow): void {
+    if (!win.isVisible()) win.show()
+    // BrowserWindow.focus()만 호출하면 비활성 NSPanel인 펫에서 열었을 때
+    // macOS 앱 자체는 비활성 상태로 남을 수 있다.
+    if (process.platform === 'darwin') app.focus({ steal: true })
+    win.focus()
+  }
+
   function showPanelHome(): void {
     const win = activePanel()
     if (!win) return
-    if (!win.isVisible()) win.show()
-    win.focus()
+    activatePanel(win)
     send(win, 'panel.shown', {}) // 열 때 항상 멘션 목록부터(직전 설정 탭 잔상 방지)
     clearPanelBadge()
   }
@@ -198,8 +205,7 @@ async function main(): Promise<void> {
   function openActivityPanel(id: string): void {
     const win = activePanel()
     if (!win) return
-    if (!win.isVisible()) win.show()
-    win.focus()
+    activatePanel(win)
     clearPanelBadge()
     send(win, 'activity.focus', id)
   }
@@ -212,10 +218,9 @@ async function main(): Promise<void> {
     const win = activePanel()
     if (!win || typeof id !== 'string' || !id) return
     if (!win.isVisible()) {
-      win.show()
       clearPanelBadge()
     }
-    win.focus()
+    activatePanel(win)
     send(win, 'mention.focus', id)
   }
   ipcMain.on('pet.openMention', (_e, id: string) => openMentionPanel(id))

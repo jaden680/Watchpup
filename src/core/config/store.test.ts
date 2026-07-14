@@ -15,7 +15,7 @@ describe('ConfigStore', () => {
     expect(s1.get().bubbleSizePercent).toBe(100)
     expect(s1.get().hudSizePercent).toBe(100)
     expect(s1.get().hudAlignment).toBe('right')
-    expect(s1.get().showActivityHud).toBe(true)
+    expect(s1.get().showActivityHud).toBe(false)
     s1.update({ mySlackUserId: 'U123', model: 'sonnet', petSizePercent: 150, bubbleSizePercent: 80, hudSizePercent: 70, hudAlignment: 'left', showActivityHud: false })
     const s2 = new ConfigStore(path)
     expect(s2.get().mySlackUserId).toBe('U123')

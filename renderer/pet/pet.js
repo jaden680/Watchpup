@@ -350,33 +350,19 @@ function createActivityRow() {
   row.append(dot, icon, title, state, context)
   const elapsed = document.createElement('span')
   elapsed.className = 'activity-elapsed'
-  const open = document.createElement('button')
-  open.type = 'button'
-  open.className = 'activity-open'
-  const openIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-  openIcon.setAttribute('viewBox', '0 0 16 16')
-  openIcon.setAttribute('aria-hidden', 'true')
-  const openIconPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-  openIconPath.setAttribute('d', 'M6.5 3H4.25A1.25 1.25 0 0 0 3 4.25v7.5A1.25 1.25 0 0 0 4.25 13h7.5A1.25 1.25 0 0 0 13 11.75V9.5M8.5 3H13v4.5M13 3 7.5 8.5')
-  openIcon.append(openIconPath)
-  open.append(openIcon)
-  open.addEventListener('click', (event) => {
-    event.stopPropagation()
-    window.watchpup.openActivity(row.dataset.activityId)
-  })
-  row.append(elapsed, open)
+  row.append(elapsed)
   row.addEventListener('click', () => window.watchpup.openActivityDetail(row.dataset.activityId))
   row.addEventListener('keydown', (event) => {
     if (event.target !== row || (event.key !== 'Enter' && event.key !== ' ')) return
     event.preventDefault()
     window.watchpup.openActivityDetail(row.dataset.activityId)
   })
-  row.activityElements = { icon, title, state, context, elapsed, open }
+  row.activityElements = { icon, title, state, context, elapsed }
   return row
 }
 
 function updateActivityRow(row, activity) {
-  const { icon, title, state, context, elapsed, open } = row.activityElements
+  const { icon, title, state, context, elapsed } = row.activityElements
   row.dataset.activityId = activity.id
   row.className = `activity-row state-${activity.state || 'waiting'}`
   row.title = `Watchpup에서 보기 · ${activity.title || ''}`
@@ -387,11 +373,6 @@ function updateActivityRow(row, activity) {
   context.hidden = !Number.isFinite(activity.contextPercent)
   context.textContent = context.hidden ? '' : `${Math.round(activity.contextPercent)}%`
   elapsed.textContent = formatElapsed(activity.updatedAt)
-  open.hidden = false
-  open.disabled = activity.canOpen === false
-  const directTarget = activity.source === 'slack' ? 'Slack 스레드' : `${ACTIVITY_NAMES[activity.source]} 세션`
-  open.title = open.disabled ? '직접 열 수 없는 항목입니다' : `${directTarget}으로 이동`
-  open.setAttribute('aria-label', open.title)
 }
 
 function renderActivities(rows) {

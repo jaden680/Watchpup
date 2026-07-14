@@ -69,6 +69,9 @@ export function createPanelWindow(saved?: SavedBounds): BrowserWindow {
     resizable: true,
     skipTaskbar: true,
     show: false,
+    // 펫은 macOS 비활성 패널이므로, 펫에서 연 창의 첫 클릭이 창 활성화에만
+    // 소비되지 않고 실제 컨트롤에도 전달되게 한다.
+    acceptFirstMouse: true,
     webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: false },
   })
   win.loadFile(rendererPath('panel', 'index.html')).catch(() => {
