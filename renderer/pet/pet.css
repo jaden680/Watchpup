@@ -11,6 +11,8 @@
   --bubble-padding-x: 14px;
   --bubble-radius: 20px;
   --bubble-font-size: 13px;
+  --bubble-line-height: 17.55px;
+  --bubble-max-height: 91px;
   --hud-width: 532px;
   --hud-padding: 7px;
   --hud-radius: 16px;
@@ -266,13 +268,14 @@ body.hud-align-right { align-items: flex-end; }
   max-width: min(var(--bubble-max-width), 100%);
   box-sizing: border-box;
   /* HUD가 창 폭을 넓혀도 말풍선은 기존 컴팩트 폭을 유지한다. */
-  overflow: visible;
+  max-height: var(--bubble-max-height);
+  overflow: hidden;
   padding: var(--bubble-padding-y) var(--bubble-padding-x);
   border-radius: var(--bubble-radius);
   border: 1px solid var(--bubble-outline);
   background: var(--bubble-bg);
   color: var(--bubble-fg);
-  font: 600 var(--bubble-font-size)/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  font: 600 var(--bubble-font-size)/var(--bubble-line-height) -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   letter-spacing: -0.12px;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.06),

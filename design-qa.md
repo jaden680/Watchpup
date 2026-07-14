@@ -20,3 +20,15 @@
 - folding: HUD 상단의 `접기`를 누르면 목록과 메시지가 사라지고 `항목 N개 · 펼치기` 바만 남으며, 접힘 상태는 재실행 후에도 유지됨.
 
 final result: passed
+
+## Long Chat Bubble Clamp
+
+- reference: 사용자가 제공한 긴 스트리밍 말풍선 캡처 (`codex-clipboard-c44923a3-f3bb-4c50-b965-968236036185.png`)
+- implementation: 현재 설정인 말풍선 80%를 적용한 실제 Electron 렌더링 (`.design-qa/chat-bubble-4-lines.png`, Git 제외)
+- comparison: 레퍼런스와 구현을 나란히 결합한 `.design-qa/chat-bubble-4-line-comparison.png` (Git 제외)
+- target: 말풍선 크기 설정값과 관계없이 본문을 최대 4줄 높이로 제한
+- behavior: 스트리밍 중 새 텍스트가 추가되면 앞부분을 `…`로 생략하고 제한된 영역 안에 가장 최근 내용만 유지
+- measurement: 80% 설정에서 본문 영역 54px, 줄 높이 13.5px로 최대 4줄임을 Electron 렌더러에서 확인
+- regression: HUD의 2줄 메시지 요약 및 말풍선 크기 60~140% 설정은 기존 동작 유지
+
+final result: passed

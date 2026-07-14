@@ -24,6 +24,7 @@ let codex = null // { spritesheet, displayName } | null (설정 시 gif/이모�
 let currentState = 'idle'
 let petSizePercent = 100
 let bubbleSizePercent = 100
+let currentBubbleText = ''
 let hudSizePercent = 100
 let hudAlignment = 'right'
 let showActivityHud = true
@@ -178,11 +179,17 @@ function setBubbleSize(value) {
   bubbleSizePercent = clampSurfaceSize(value)
   const scale = bubbleSizePercent / 100
   const root = document.documentElement.style
+  const paddingY = Math.round(9 * scale)
+  const fontSize = Math.max(10, Math.round(13 * scale))
+  const lineHeight = fontSize * 1.35
   root.setProperty('--bubble-max-width', `${Math.round(320 * scale)}px`)
-  root.setProperty('--bubble-padding-y', `${Math.round(9 * scale)}px`)
+  root.setProperty('--bubble-padding-y', `${paddingY}px`)
   root.setProperty('--bubble-padding-x', `${Math.round(14 * scale)}px`)
   root.setProperty('--bubble-radius', `${Math.round(20 * scale)}px`)
-  root.setProperty('--bubble-font-size', `${Math.max(10, Math.round(13 * scale))}px`)
+  root.setProperty('--bubble-font-size', `${fontSize}px`)
+  root.setProperty('--bubble-line-height', `${lineHeight}px`)
+  root.setProperty('--bubble-max-height', `${Math.ceil(lineHeight * 4 + paddingY * 2 + 2)}px`)
+  if (currentBubbleText && !bubble.classList.contains('hidden')) renderBubbleText(currentBubbleText)
   syncSize()
 }
 
@@ -429,12 +436,36 @@ function hideBubbleSurface() {
   renderBubbleSurface()
 }
 
-function showBubble(text, hideAfterMs) {
+function renderBubbleText(text) {
+  bubble.style.width = ''
   bubble.textContent = text
+  if (bubble.scrollHeight <= bubble.clientHeight) return
+
+  // 전체 문장으로 결정된 폭을 고정한 뒤, 가장 최근 4줄이 온전히 들어오는 접점을 찾는다.
+  bubble.style.width = `${bubble.getBoundingClientRect().width}px`
+  let low = 0
+  let high = text.length
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    bubble.textContent = `…${text.slice(middle).trimStart()}`
+    if (bubble.scrollHeight <= bubble.clientHeight) high = middle
+    else low = middle + 1
+  }
+
+  const suffix = text.slice(low)
+  const nextWord = suffix.search(/\s/)
+  const start = nextWord >= 0 && nextWord < suffix.length - 1 ? low + nextWord + 1 : low
+  bubble.textContent = `…${text.slice(start).trimStart()}`
+}
+
+function showBubble(text, hideAfterMs) {
+  currentBubbleText = text
   hudMessageText.textContent = text
   hudMessage.title = text
+  bubble.setAttribute('aria-label', text)
   bubbleActive = true
   renderBubbleSurface()
+  renderBubbleText(text)
   if (bubbleTimer) clearTimeout(bubbleTimer)
   if (hideAfterMs) {
     bubbleTimer = setTimeout(hideBubbleSurface, hideAfterMs)
@@ -472,13 +503,11 @@ window.watchpup.onChatBubble((ev) => {
     chatStreaming = true
     chatBuf += ev.text || ''
     showBubble(chatBuf || '…', null)
-    bubble.scrollTop = bubble.scrollHeight
   } else if (type === 'result') {
     chatStreaming = false
     bubble.classList.remove('streaming')
     hudMessage.classList.remove('streaming')
     showBubble(ev.text || chatBuf || '(빈 응답)', 20000)
-    bubble.scrollTop = bubble.scrollHeight
   } else if (type === 'error') {
     chatStreaming = false
     bubble.classList.remove('streaming')
