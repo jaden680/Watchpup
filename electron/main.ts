@@ -31,6 +31,7 @@ import { activityTarget } from './activity-link.js'
 import { resolveWatchpupConfigPath } from '../src/core/config/path.js'
 import { ReminderGateway } from './reminders.js'
 import { WorkStatusService } from './work-status.js'
+import { focusVisiblePanel } from './panel-activation.js'
 
 let pet: BrowserWindow | null = null
 let panel: BrowserWindow | null = null
@@ -186,6 +187,9 @@ async function main(): Promise<void> {
     event.preventDefault()
     activePanel()?.hide()
   })
+  // Cmd+Tab으로 Watchpup이 다시 활성화될 때 이미 열려 있는 상세 패널을 앞으로 가져온다.
+  // 숨겨진 패널은 건드리지 않아 펫 더블클릭으로만 여는 동작을 유지한다.
+  app.on('did-become-active', () => focusVisiblePanel(activePanel()))
 
 
   rememberBounds(panel, 'panel')

@@ -67,7 +67,8 @@ export function createPanelWindow(saved?: SavedBounds): BrowserWindow {
     // 펫만 항상 맨앞. 패널은 일반 창처럼 — 다른 앱 포커스 시 뒤로.
     alwaysOnTop: false,
     resizable: true,
-    skipTaskbar: true,
+    // 상세 패널은 macOS Cmd+Tab으로 다시 돌아올 수 있는 일반 창으로 다룬다.
+    skipTaskbar: false,
     show: false,
     // 펫은 macOS 비활성 패널이므로, 펫에서 연 창의 첫 클릭이 창 활성화에만
     // 소비되지 않고 실제 컨트롤에도 전달되게 한다.
