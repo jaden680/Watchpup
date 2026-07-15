@@ -474,6 +474,7 @@ let bubbleActivityId = null
 let bubbleCalendarEvent = false
 let bubbleCalendarPrivacy = false
 let bubbleExternalUrl = null
+let bubbleBuildTool = null
 window.watchpup.onBubble((payload) => {
   // payload: string(구버전/idle) 또는 연결 대상이 포함된 말풍선 객체.
   const text = typeof payload === 'string' ? payload : payload && payload.text
@@ -483,6 +484,7 @@ window.watchpup.onBubble((payload) => {
   const calendarEvent = typeof payload === 'object' && payload ? payload.calendarEvent === true : false
   const calendarPrivacy = typeof payload === 'object' && payload ? payload.calendarPrivacy === true : false
   const externalUrl = typeof payload === 'object' && payload ? (payload.externalUrl || payload.slackNewsUrl) : null
+  const buildTool = typeof payload === 'object' && payload ? payload.buildTool : null
   if (typeof text !== 'string' || !text) return
   if (!canIncomingBubbleReplaceStream(chatStreaming, chatBuf)) return
   if (chatStreaming) finishChatStreaming()
@@ -492,9 +494,10 @@ window.watchpup.onBubble((payload) => {
   bubbleCalendarEvent = calendarEvent
   bubbleCalendarPrivacy = calendarPrivacy
   bubbleExternalUrl = typeof externalUrl === 'string' ? externalUrl : null
+  bubbleBuildTool = buildTool === 'xcode' || buildTool === 'android' ? buildTool : null
   bubble.classList.remove('streaming')
   hudMessage.classList.remove('streaming')
-  const clickable = !!bubbleMentionId || !!bubbleWorkItemId || !!bubbleActivityId || bubbleCalendarEvent || bubbleCalendarPrivacy || !!bubbleExternalUrl
+  const clickable = !!bubbleMentionId || !!bubbleWorkItemId || !!bubbleActivityId || bubbleCalendarEvent || bubbleCalendarPrivacy || !!bubbleExternalUrl || !!bubbleBuildTool
   bubble.classList.toggle('clickable', clickable)
   hudMessage.classList.toggle('clickable', clickable)
   showBubble(text, 30000)
@@ -542,12 +545,13 @@ activityHud.addEventListener('click', (event) => {
 })
 // 말풍선 클릭 → 스레드가 연결돼 있으면 그 스레드를 열고, 아니면 패널을 연다.
 function openBubbleTarget() {
-  const target = bubbleOpenTarget(bubbleMentionId, bubbleWorkItemId, bubbleActivityId, bubbleCalendarEvent, bubbleCalendarPrivacy, bubbleExternalUrl)
+  const target = bubbleOpenTarget(bubbleMentionId, bubbleWorkItemId, bubbleActivityId, bubbleCalendarEvent, bubbleCalendarPrivacy, bubbleExternalUrl, bubbleBuildTool)
   if (target.kind === 'mention') window.watchpup.openMention(target.id)
   else if (target.kind === 'work') window.watchpup.openWorkItem(target.id)
   else if (target.kind === 'activity') window.watchpup.openActivityDetail(target.id)
   else if (target.kind === 'calendar-privacy') window.watchpup.openCalendarPrivacy()
   else if (target.kind === 'calendar') window.watchpup.openCalendar()
+  else if (target.kind === 'build-tool') window.watchpup.openBuildTool(target.tool)
   else if (target.kind === 'external') window.watchpup.openExternal(target.url)
   else window.watchpup.showPanel()
   hideBubbleSurface()

@@ -117,6 +117,9 @@ export interface SettingsPatch {
   slackNewsEnabled?: boolean
   slackNewsChannels?: string[]
   slackNewsKeywords?: string[]
+  buildAlertsEnabled?: boolean
+  xcodeBuildAlertsEnabled?: boolean
+  androidBuildAlertsEnabled?: boolean
   petImageDir?: string
   petCodexDir?: string
   persona?: string

@@ -39,6 +39,16 @@ describe('잔소리 베타 설정', () => {
     expect(enabled?.closest('.nagging-github-pr')?.textContent).toContain('20분')
   })
 
+  it('Xcode와 Android Studio 빌드 완료 알림을 각각 선택할 수 있다', () => {
+    const enabled = document.querySelector('input[name="buildAlertsEnabled"]')
+    const xcode = document.querySelector('input[name="xcodeBuildAlertsEnabled"]')
+    const android = document.querySelector('input[name="androidBuildAlertsEnabled"]')
+    expect(enabled?.checked).toBe(false)
+    expect(xcode?.checked).toBe(true)
+    expect(android?.checked).toBe(true)
+    expect(document.querySelector('.build-alert-card')?.textContent).toContain('로컬 빌드 로그')
+  })
+
   it('기본 공지 채널과 사용자 키워드 구독 입력을 제공한다', () => {
     const enabled = document.querySelector('input[name="slackNewsEnabled"]')
     const channels = document.querySelector('textarea[name="slackNewsChannels"]')

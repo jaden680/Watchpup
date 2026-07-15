@@ -23,10 +23,11 @@ export function hudFoldContent({ activityCount, folded }) {
   }
 }
 
-export function bubbleOpenTarget(mentionId, workItemId, activityId, calendarEvent, calendarPrivacy, externalUrl) {
+export function bubbleOpenTarget(mentionId, workItemId, activityId, calendarEvent, calendarPrivacy, externalUrl, buildTool) {
   if (mentionId) return { kind: 'mention', id: mentionId }
   if (workItemId) return { kind: 'work', id: workItemId }
   if (activityId) return { kind: 'activity', id: activityId }
+  if (buildTool) return { kind: 'build-tool', tool: buildTool }
   if (externalUrl) return { kind: 'external', url: externalUrl }
   if (calendarPrivacy) return { kind: 'calendar-privacy' }
   if (calendarEvent) return { kind: 'calendar' }

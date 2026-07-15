@@ -91,4 +91,9 @@ describe('bubbleOpenTarget', () => {
       url: 'https://workspace.slack.com/archives/C1/p1',
     })
   })
+
+  it('빌드 완료 말풍선은 해당 IDE를 연다', () => {
+    expect(bubbleOpenTarget(null, null, null, false, false, null, 'xcode')).toEqual({ kind: 'build-tool', tool: 'xcode' })
+    expect(bubbleOpenTarget(null, null, null, false, false, null, 'android')).toEqual({ kind: 'build-tool', tool: 'android' })
+  })
 })

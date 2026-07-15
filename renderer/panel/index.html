@@ -424,6 +424,25 @@
               </div>
               <p id="nagging-hint" class="hint">활성화하면 캘린더 접근 권한을 요청하고, 5~12분 사이의 랜덤한 시점에 Work·GitHub PR·Slack 소식 말풍선이 나타납니다.</p>
             </fieldset>
+            <fieldset class="build-alert-card">
+              <legend>빌드 완료 알림 <span class="beta-badge">Beta</span></legend>
+              <label class="checkbox build-alert-toggle">
+                <input type="checkbox" name="buildAlertsEnabled" />
+                IDE 빌드가 끝나면 바로 말 걸기
+              </label>
+              <p class="nagging-copy">로컬 빌드 로그의 변경분만 확인해 성공·실패를 알려줘요. 외부 API를 호출하지 않으며, 말풍선을 누르면 해당 IDE가 앞으로 옵니다.</p>
+              <div class="build-alert-tools">
+                <label class="checkbox">
+                  <input type="checkbox" name="xcodeBuildAlertsEnabled" checked />
+                  Xcode
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="androidBuildAlertsEnabled" checked />
+                  Android Studio
+                </label>
+              </div>
+              <p id="build-alert-hint" class="hint">현재 꺼져 있어요. 활성화 이후 완료되는 새 빌드부터 알려줍니다.</p>
+            </fieldset>
             <fieldset class="nagging-debug-card">
               <legend>디버그 로그</legend>
               <div class="nagging-log-header">

@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('watchpup', {
   openActivityDetail: (id?: string) => ipcRenderer.send('activity.detail', id),
   openCalendar: () => ipcRenderer.send('pet.openCalendar'),
   openCalendarPrivacy: () => ipcRenderer.send('calendar.privacy.open'),
+  openBuildTool: (tool: 'xcode' | 'android') => ipcRenderer.send('build.tool.open', tool),
   mentionsList: () => ipcRenderer.invoke(CMD.mentionsList),
   workLists: () => ipcRenderer.invoke(CMD.workLists),
   workItems: (listId?: string, includeCompleted = false) => ipcRenderer.invoke(CMD.workItems, { listId, includeCompleted }),

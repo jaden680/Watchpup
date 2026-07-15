@@ -2,6 +2,7 @@ import { app, ipcMain, Tray, nativeImage, clipboard, screen, shell, dialog, Brow
 import { join, basename } from 'node:path'
 import { existsSync, readdirSync, readFileSync, statSync, cpSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { execFile } from 'node:child_process'
 import { keychain, SecretKeys } from '../src/core/secrets/keychain.js'
 import { ConfigStore } from '../src/core/config/store.js'
 import { SessionStore } from '../src/core/session/store.js'
@@ -49,12 +50,14 @@ import { focusVisiblePanel, setPanelSwitcherVisibility } from './panel-activatio
 import { ClaudeModelCatalogService } from '../src/core/agent/model-catalog.js'
 import { ensureOpenAtLogin } from './login-item.js'
 import { GithubPrNotificationPoller, githubPrNaggingLine } from '../src/core/github/notifications.js'
+import { BuildCompletionPoller, buildCompletionLine, type BuildTool } from '../src/core/build/completion-poller.js'
 
 let pet: BrowserWindow | null = null
 let panel: BrowserWindow | null = null
 let gateway: WatchpupGateway | null = null
 let agentPoller: LocalAgentPoller | null = null
 let githubPrPoller: GithubPrNotificationPoller | null = null
+let buildCompletionPoller: BuildCompletionPoller | null = null
 let unread = 0
 let lastActivity = Date.now()
 let isQuitting = false
@@ -105,6 +108,23 @@ async function main(): Promise<void> {
       return { enabled: current.naggingEnabled && current.githubPrNaggingEnabled }
     },
     (item) => state.enqueueNaggingGithubPr(item),
+  )
+  buildCompletionPoller = new BuildCompletionPoller(
+    () => {
+      const current = configStore.get()
+      return {
+        enabled: current.buildAlertsEnabled,
+        xcodeEnabled: current.xcodeBuildAlertsEnabled,
+        androidEnabled: current.androidBuildAlertsEnabled,
+      }
+    },
+    (event) => {
+      const key = `build:${event.id}`
+      if (state.seen(key)) return
+      state.markSeen(key)
+      send(pet, EVT.bubble, { text: buildCompletionLine(event), buildTool: event.tool })
+      lastActivity = Date.now()
+    },
   )
   const deps = {
     config,
@@ -367,6 +387,10 @@ async function main(): Promise<void> {
   })
   ipcMain.on('calendar.privacy.open', () => {
     void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars')
+  })
+  ipcMain.on('build.tool.open', (_e, tool: BuildTool) => {
+    const bundleId = tool === 'xcode' ? 'com.apple.dt.Xcode' : tool === 'android' ? 'com.google.android.studio' : ''
+    if (bundleId) execFile('/usr/bin/open', ['-b', bundleId], () => {})
   })
   // permalink 등 외부 링크는 기본 브라우저로 (창 네비게이션 방지)
   ipcMain.on('open.external', (_e, url: string) => {
@@ -775,6 +799,7 @@ async function main(): Promise<void> {
 
   scheduleNagging()
   githubPrPoller.start()
+  buildCompletionPoller.start()
   setInterval(() => { void runPriorityNagging() }, 30_000)
   setTimeout(() => { void runPriorityNagging() }, 2_000)
 
@@ -878,6 +903,9 @@ async function main(): Promise<void> {
       if (!c.naggingEnabled || !c.githubPrNaggingEnabled) state.clearNaggingGithubPr()
       else void githubPrPoller?.pollNow()
     }
+    if ('buildAlertsEnabled' in patch || 'xcodeBuildAlertsEnabled' in patch || 'androidBuildAlertsEnabled' in patch) {
+      void buildCompletionPoller?.pollNow()
+    }
     if ('naggingEnabled' in patch || 'slackNewsEnabled' in patch || 'slackNewsChannels' in patch || 'slackNewsKeywords' in patch) {
       if (slackNewsChanged) state.clearNaggingSlackNews()
       void gateway?.refreshSlackNews()
@@ -975,6 +1003,7 @@ app.on('before-quit', () => {
   isQuitting = true
   agentPoller?.stop()
   githubPrPoller?.stop()
+  buildCompletionPoller?.stop()
   gateway?.stop().catch(() => {})
 })
 

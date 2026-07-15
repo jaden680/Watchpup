@@ -93,6 +93,10 @@ export const watchpupConfigSchema = z.object({
   slackNewsEnabled: z.boolean().default(false),
   slackNewsChannels: z.array(z.string()).default(['all_전사공유', 'all_전사공지', 'all_random']),
   slackNewsKeywords: z.array(z.string()).default([]),
+  // Xcode·Android Studio의 로컬 빌드 로그 변경을 감지해 완료 즉시 말풍선으로 알린다.
+  buildAlertsEnabled: z.boolean().default(false),
+  xcodeBuildAlertsEnabled: z.boolean().default(true),
+  androidBuildAlertsEnabled: z.boolean().default(true),
   // Work 탭에서 사용할 Apple Reminders 목록. Watchpup이 자체적으로 선택을 저장한다.
   reminderListId: z.string().default(''),
   reminderListName: z.string().default(''),

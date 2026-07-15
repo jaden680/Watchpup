@@ -1423,6 +1423,14 @@ button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); 
 .nagging-card.is-disabled .nagging-calendar-access { opacity: 0.45; }
 .nagging-card.is-disabled .nagging-slack-news { opacity: 0.45; }
 .nagging-card.is-disabled .nagging-github-pr { opacity: 0.45; }
+.build-alert-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+#settings-form .build-alert-tools .checkbox {
+  min-width: 150px; padding: 9px 11px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-sunken);
+  font-size: 12px; font-weight: 700;
+}
+.build-alert-card.is-disabled .build-alert-tools,
+.build-alert-card.is-disabled #build-alert-hint { opacity: 0.45; }
 .nagging-log-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .nagging-log-header p { display: grid; gap: 3px; margin: 0; color: var(--fg-faint); font-size: 10.5px; }
 .nagging-log-header strong { color: var(--fg); font-size: 12px; }

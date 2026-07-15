@@ -142,6 +142,11 @@ const githubPrNaggingEnabledInput = settingsForm.elements['githubPrNaggingEnable
 const slackNewsEnabledInput = settingsForm.elements['slackNewsEnabled']
 const slackNewsChannelsInput = settingsForm.elements['slackNewsChannels']
 const slackNewsKeywordsInput = settingsForm.elements['slackNewsKeywords']
+const buildAlertsEnabledInput = settingsForm.elements['buildAlertsEnabled']
+const xcodeBuildAlertsEnabledInput = settingsForm.elements['xcodeBuildAlertsEnabled']
+const androidBuildAlertsEnabledInput = settingsForm.elements['androidBuildAlertsEnabled']
+const buildAlertCard = document.querySelector('.build-alert-card')
+const buildAlertHint = document.getElementById('build-alert-hint')
 const naggingCard = document.querySelector('.nagging-card')
 const naggingHint = document.getElementById('nagging-hint')
 const naggingCalendarSettings = document.getElementById('nagging-calendar-settings')
@@ -288,6 +293,22 @@ function updateNaggingControls() {
   }
 }
 
+function updateBuildAlertControls() {
+  const enabled = !!buildAlertsEnabledInput?.checked
+  if (xcodeBuildAlertsEnabledInput) xcodeBuildAlertsEnabledInput.disabled = !enabled
+  if (androidBuildAlertsEnabledInput) androidBuildAlertsEnabledInput.disabled = !enabled
+  buildAlertCard?.classList.toggle('is-disabled', !enabled)
+  const tools = [
+    xcodeBuildAlertsEnabledInput?.checked ? 'Xcode' : '',
+    androidBuildAlertsEnabledInput?.checked ? 'Android Studio' : '',
+  ].filter(Boolean)
+  if (buildAlertHint) {
+    buildAlertHint.textContent = enabled
+      ? `${tools.join('·') || '선택한 IDE 없음'}의 새 빌드 완료를 약 3초 안에 알려줍니다.`
+      : '현재 꺼져 있어요. 활성화 이후 완료되는 새 빌드부터 알려줍니다.'
+  }
+}
+
 if (petSizeInput) petSizeInput.addEventListener('input', updatePetSizeLabel)
 if (bubbleSizeInput) bubbleSizeInput.addEventListener('input', updateBubbleSizeLabel)
 if (hudSizeInput) hudSizeInput.addEventListener('input', updateHudSizeLabel)
@@ -297,6 +318,9 @@ if (naggingMinInput) naggingMinInput.addEventListener('input', updateNaggingCont
 if (naggingMaxInput) naggingMaxInput.addEventListener('input', updateNaggingControls)
 if (githubPrNaggingEnabledInput) githubPrNaggingEnabledInput.addEventListener('change', updateNaggingControls)
 if (slackNewsEnabledInput) slackNewsEnabledInput.addEventListener('change', updateNaggingControls)
+if (buildAlertsEnabledInput) buildAlertsEnabledInput.addEventListener('change', updateBuildAlertControls)
+if (xcodeBuildAlertsEnabledInput) xcodeBuildAlertsEnabledInput.addEventListener('change', updateBuildAlertControls)
+if (androidBuildAlertsEnabledInput) androidBuildAlertsEnabledInput.addEventListener('change', updateBuildAlertControls)
 if (naggingCalendarSettings) naggingCalendarSettings.addEventListener('click', () => window.watchpup.openCalendarPrivacy())
 if (naggingLogRefresh) naggingLogRefresh.addEventListener('click', () => renderNaggingLog())
 if (naggingLogClear) naggingLogClear.addEventListener('click', async () => {
@@ -324,11 +348,15 @@ async function loadSettings() {
   if (slackNewsEnabledInput) slackNewsEnabledInput.checked = cfg.slackNewsEnabled === true
   if (slackNewsChannelsInput) slackNewsChannelsInput.value = (cfg.slackNewsChannels || ['all_전사공유', 'all_전사공지', 'all_random']).join(', ')
   if (slackNewsKeywordsInput) slackNewsKeywordsInput.value = (cfg.slackNewsKeywords || []).join(', ')
+  if (buildAlertsEnabledInput) buildAlertsEnabledInput.checked = cfg.buildAlertsEnabled === true
+  if (xcodeBuildAlertsEnabledInput) xcodeBuildAlertsEnabledInput.checked = cfg.xcodeBuildAlertsEnabled !== false
+  if (androidBuildAlertsEnabledInput) androidBuildAlertsEnabledInput.checked = cfg.androidBuildAlertsEnabled !== false
   updatePetSizeLabel()
   updateBubbleSizeLabel()
   updateHudSizeLabel()
   updateHudControls()
   updateNaggingControls()
+  updateBuildAlertControls()
   await renderNaggingLog()
   if (settingsForm.elements['persona']) settingsForm.elements['persona'].value = cfg.persona || ''
   if (settingsForm.elements['bubbleStyle']) settingsForm.elements['bubbleStyle'].value = cfg.bubbleStyle || 'status'
@@ -720,6 +748,9 @@ settingsForm.addEventListener('submit', async (e) => {
     slackNewsEnabled: slackNewsEnabledInput ? slackNewsEnabledInput.checked : false,
     slackNewsChannels: subscriptionList(slackNewsChannelsInput?.value),
     slackNewsKeywords: subscriptionList(slackNewsKeywordsInput?.value),
+    buildAlertsEnabled: buildAlertsEnabledInput ? buildAlertsEnabledInput.checked : false,
+    xcodeBuildAlertsEnabled: xcodeBuildAlertsEnabledInput ? xcodeBuildAlertsEnabledInput.checked : true,
+    androidBuildAlertsEnabled: androidBuildAlertsEnabledInput ? androidBuildAlertsEnabledInput.checked : true,
     persona: settingsForm.elements['persona'] ? settingsForm.elements['persona'].value.trim() : '',
     bubbleStyle: settingsForm.elements['bubbleStyle'] ? settingsForm.elements['bubbleStyle'].value : 'status',
     enableBot: settingsForm.elements['enableBot'].checked,
