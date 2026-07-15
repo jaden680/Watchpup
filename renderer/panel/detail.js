@@ -69,11 +69,106 @@ function renderDetail(m) {
     reBtn.textContent = '분석 중…'
     window.watchpup.reanalyze(m.id).catch((e) => console.error('reanalyze 실패', e))
   })
+  const dueInput = document.createElement('input')
+  dueInput.type = 'datetime-local'
+  dueInput.className = 'due-input'
+  dueInput.title = '마감일(선택) — 비우면 마감일 없이 추가/업데이트'
+  function dueInputValue() {
+    if (!dueInput.value) return undefined
+    const ms = new Date(dueInput.value).getTime()
+    return Number.isFinite(ms) ? ms : undefined
+  }
+
+  const workBtn = document.createElement('button')
+  workBtn.type = 'button'
+  workBtn.className = 'reanalyze-btn'
+  workBtn.textContent = '＋ 빠른 추가'
+  workBtn.title = '고정 템플릿으로 이 멘션을 선택된 미리 알림 목록에 추가'
+  workBtn.addEventListener('click', async () => {
+    const original = workBtn.textContent
+    workBtn.disabled = true
+    workBtn.textContent = '추가 중…'
+    try {
+      const result = await window.watchpup.mentionToWork(m.id, dueInputValue())
+      workBtn.textContent = result && result.ok === false && result.reason === 'no-list'
+        ? '목록을 먼저 선택하세요'
+        : (result && result.updated ? '업데이트됨' : '추가됨')
+    } catch (e) {
+      console.error('mentionToWork 실패', e)
+      workBtn.textContent = '실패: ' + (e?.message || e)
+    } finally {
+      setTimeout(() => {
+        workBtn.textContent = original
+        workBtn.disabled = false
+      }, 1500)
+    }
+  })
+
+  // 스레드 내용을 LLM으로 요약해 미리알림 초안 생성. 추가 지시는 선택 입력.
+  const aiBtn = document.createElement('button')
+  aiBtn.type = 'button'
+  aiBtn.className = 'reanalyze-btn'
+  aiBtn.textContent = '✨ 프롬프트로 생성'
+  aiBtn.title = '스레드 내용을 바탕으로 AI가 미리알림 초안을 생성'
+
+  const aiPromptRow = document.createElement('div')
+  aiPromptRow.className = 'ai-reminder-row hidden'
+  const aiExtra = document.createElement('textarea')
+  aiExtra.className = 'dev-extra'
+  aiExtra.rows = 2
+  aiExtra.placeholder = '추가 지시(선택): 미리알림 구조를 어떻게 조정할지'
+  const aiGenBtn = document.createElement('button')
+  aiGenBtn.type = 'button'
+  aiGenBtn.className = 'reanalyze-btn primary'
+  aiGenBtn.textContent = '생성'
+  const aiStatus = document.createElement('span')
+  aiStatus.className = 'reply-status'
+  aiPromptRow.append(aiExtra, aiGenBtn, aiStatus)
+
+  aiBtn.addEventListener('click', () => {
+    aiPromptRow.classList.toggle('hidden')
+  })
+  aiGenBtn.addEventListener('click', async () => {
+    if (aiGenBtn.disabled) return
+    const original = aiGenBtn.textContent
+    aiGenBtn.disabled = true
+    aiGenBtn.textContent = '생성 중…'
+    aiStatus.textContent = ''
+    try {
+      const result = await window.watchpup.mentionToWorkAI(m.id, aiExtra.value.trim(), dueInputValue())
+      if (result && result.ok === false && result.reason === 'no-list') {
+        aiStatus.textContent = '목록을 먼저 선택하세요'
+      } else {
+        aiStatus.textContent = result && result.updated ? '업데이트됨' : '추가됨'
+        aiPromptRow.classList.add('hidden')
+      }
+    } catch (e) {
+      console.error('mentionToWorkAI 실패', e)
+      aiStatus.textContent = '실패: ' + (e?.message || e)
+    } finally {
+      aiGenBtn.disabled = false
+      aiGenBtn.textContent = original
+    }
+  })
+
+  // 이 스레드에 이미 매핑된 Reminder가 있으면(=중복 추가된 게 아니라 기존에 연결된 TODO가
+  // 있으면) 이동 버튼을 보여준다. 조회는 비동기라 우선 숨겨두고 결과가 오면 채운다.
+  const goToWorkBtn = document.createElement('button')
+  goToWorkBtn.type = 'button'
+  goToWorkBtn.className = 'reanalyze-btn hidden'
+  goToWorkBtn.textContent = '↪ TODO로 이동'
+  goToWorkBtn.title = '이 스레드에 연결된 미리 알림으로 이동'
+  window.watchpup.mentionReminderLink(m.id).then((reminderId) => {
+    if (!reminderId || state.current !== m.id) return
+    goToWorkBtn.classList.remove('hidden')
+    goToWorkBtn.addEventListener('click', () => window.watchpup.openWorkItem(reminderId))
+  }).catch((e) => console.error('mentionReminderLink 실패', e))
+
   const rightWrap = document.createElement('div')
   rightWrap.className = 'head-right'
-  rightWrap.append(reBtn, dref, pill)
+  rightWrap.append(reBtn, dueInput, workBtn, aiBtn, goToWorkBtn, dref, pill)
   row.append(where, rightWrap)
-  head.append(row)
+  head.append(row, aiPromptRow)
 
   // 카테고리 선택(수동 이동/수정)
   const catRow = document.createElement('div')

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CMD, EVT } from './ipc.js'
-import type { SettingsPatch, TokensPatch, Playbook } from './ipc.js'
+import type { SettingsPatch, TokensPatch, Playbook, MentionToWorkResult } from './ipc.js'
 
 function sub(channel: string, cb: (payload: unknown) => void): () => void {
   const listener = (_e: unknown, payload: unknown): void => cb(payload)
@@ -38,6 +38,12 @@ contextBridge.exposeInMainWorld('watchpup', {
   workRemindersOpen: () => ipcRenderer.invoke(CMD.workRemindersOpen),
   mentionGet: (id: string) => ipcRenderer.invoke(CMD.mentionGet, id),
   mentionRead: (id: string) => ipcRenderer.invoke(CMD.mentionRead, id),
+  // 이 멘션 스레드에 매핑된 살아있는 Reminder id(없으면 null) — "TODO로 이동" 버튼 표시 여부에 사용
+  mentionReminderLink: (id: string): Promise<string | null> => ipcRenderer.invoke(CMD.mentionReminderLink, id),
+  mentionToWork: (id: string, dueAt?: number): Promise<MentionToWorkResult> =>
+    ipcRenderer.invoke(CMD.mentionToWork, id, dueAt),
+  mentionToWorkAI: (id: string, extra?: string, dueAt?: number): Promise<MentionToWorkResult> =>
+    ipcRenderer.invoke(CMD.mentionToWorkAI, id, extra, dueAt),
   threadImport: (permalink: string) => ipcRenderer.invoke(CMD.threadImport, permalink),
   todoToggle: (id: string, index: number) => ipcRenderer.invoke(CMD.todoToggle, { mentionId: id, index }),
   replyApprove: (id: string) => ipcRenderer.invoke(CMD.replyApprove, id),

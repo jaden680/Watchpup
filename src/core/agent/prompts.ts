@@ -53,6 +53,29 @@ export function playbookActionPrompt(args: { playbook: Playbook; context: string
   ].join('\n')
 }
 
+/** 스레드 기반 미리알림(Reminder) 초안 생성 프롬프트. extra가 있으면 우선 반영 지시로 삽입. */
+export function reminderPrompt(args: {
+  threadText: string
+  authorName: string
+  channelName?: string
+  extra?: string
+}): string {
+  const extra = (args.extra || '').trim()
+  return [
+    `채널: ${args.channelName ?? '(unknown)'}`,
+    `이 스레드에서 ${args.authorName} 님이 당신의 사용자를 멘션했습니다.`,
+    '--- 스레드 내용 ---',
+    args.threadText,
+    '--- 끝 ---',
+    extra ? `사용자 추가 지시(우선 반영): ${extra}` : '',
+    '위 스레드를 바탕으로 미리 알림(Reminder) 초안을 만드세요.',
+    '반드시 아래 JSON만 출력하세요(코드펜스 없이, 다른 텍스트 금지):',
+    '{"title":"미리알림 제목(간결, 한국어, 40자 내외 권장)","notes":"미리알림 메모 본문(스레드 핵심 맥락/배경 요약). 링크·작성자·채널 라벨은 넣지 마세요(하류에서 별도로 붙입니다)","subtasks":["해야 할 세부 작업"],"dueDate":"스레드에 마감/기한이 명시되거나 강하게 암시된 경우에만 ISO 8601(날짜 YYYY-MM-DD 또는 날짜+시간)로 채우고, 그렇지 않으면 null"}',
+    '해야 할 세부 작업이 없으면 subtasks는 빈 배열로 출력하세요.',
+    '마감일이 불명확하면 억지로 추론하지 말고 dueDate를 null로 출력하세요.',
+  ].filter(Boolean).join('\n')
+}
+
 export function analysisUserPrompt(args: {
   threadText: string
   authorName: string

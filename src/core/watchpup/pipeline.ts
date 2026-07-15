@@ -6,8 +6,9 @@ import { Keychain } from '../secrets/keychain.js'
 import { computeToolScope } from '../safety/gating.js'
 import { writeMcpConfigFile, resolveMcpSecretEnv } from '../mcp/registry.js'
 import { runClaude } from '../agent/executor.js'
-import { watchpupSystemPrompt, analysisUserPrompt, playbookActionPrompt } from '../agent/prompts.js'
-import { parseAnalysis } from '../agent/analysis.js'
+import { watchpupSystemPrompt, analysisUserPrompt, playbookActionPrompt, reminderPrompt } from '../agent/prompts.js'
+import { parseAnalysis, parseReminderDraft, type ReminderDraftText } from '../agent/analysis.js'
+import { threadText } from './mention-context.js'
 
 export interface PipelineDeps {
   config: WatchpupConfig
@@ -99,6 +100,40 @@ export async function analyzeMention(
     analysis,
     todos: analysis.todos.map((t) => ({ text: t.text, done: false, playbookId: t.playbookId })),
   }
+}
+
+/**
+ * 스레드 내용 기반 미리알림(Reminder) 초안 생성. 저장된 스레드(threadText)만 사용(재조회 없음).
+ * 세션 재사용 없이 단발 호출 — 스레드 텍스트를 프롬프트에 직접 담아 보내므로 resume이 불필요.
+ */
+export async function generateReminderDraft(
+  deps: PipelineDeps,
+  input: { mention: Mention; extra?: string },
+): Promise<ReminderDraftText> {
+  const { config } = deps
+  const run = deps.runClaudeFn ?? runClaude
+  const { mention, extra } = input
+  const { scope, mcpConfigPath, secretEnv, addDirs } = await prepare(deps)
+
+  const result: AgentResult = await run({
+    prompt: reminderPrompt({
+      threadText: threadText(mention),
+      authorName: mention.authorName ?? mention.authorId,
+      channelName: mention.channelName,
+      extra,
+    }),
+    config,
+    agents: {},
+    allowedTools: scope.allowedTools,
+    disallowedTools: scope.disallowedTools,
+    systemPrompt: watchpupSystemPrompt(config.botName, config.persona),
+    isResume: false,
+    addDirs,
+    mcpConfigPath,
+    secretEnv,
+    permissionMode: 'default',
+  })
+  return parseReminderDraft(result.text)
 }
 
 export async function chatFollowup(

@@ -9,7 +9,7 @@ import type { NaggingCalendarEvent } from '../src/core/presentation/nagging.js'
 
 const execFileAsync = promisify(execFile)
 
-export type ReminderCommand = 'lists' | 'tasks' | 'create' | 'add-subtask' | 'update-title' | 'update-user-note' | 'set-completed' | 'append-link' | 'upcoming-events'
+export type ReminderCommand = 'lists' | 'tasks' | 'create' | 'add-subtask' | 'update-title' | 'update-user-note' | 'set-completed' | 'set-due' | 'append-link' | 'upcoming-events'
 export type ReminderCommandRunner = (command: ReminderCommand, args: string[]) => Promise<string>
 export type CalendarCommandRunner = (command: 'upcoming-events', args: string[]) => Promise<string>
 
@@ -136,10 +136,14 @@ export class ReminderGateway {
     await this.runCommand('set-completed', [reminderId, String(completed)])
   }
 
-  async create(listId: string, title: string, notes = ''): Promise<string> {
+  async create(listId: string, title: string, notes = '', dueAt?: number): Promise<string> {
     const safeTitle = title.trim()
     if (!safeTitle) throw new Error('작업 제목을 입력해주세요.')
-    const raw = await this.runCommand('create', [listId, safeTitle, notes.trim()])
+    const args = [listId, safeTitle, notes.trim()]
+    if (typeof dueAt === 'number' && Number.isFinite(dueAt) && dueAt > 0) {
+      args.push(String(dueAt))
+    }
+    const raw = await this.runCommand('create', args)
     const result = JSON.parse(raw || '{}') as { id?: unknown }
     const id = typeof result.id === 'string' ? result.id : ''
     if (!id) throw new Error('생성된 Reminder ID를 확인하지 못했습니다.')
@@ -150,6 +154,11 @@ export class ReminderGateway {
     const safeTitle = title.trim()
     if (!safeTitle) throw new Error('작업 제목을 입력해주세요.')
     await this.runCommand('update-title', [reminderId, safeTitle])
+  }
+
+  async setDue(reminderId: string, dueAt: number | null): Promise<void> {
+    const value = typeof dueAt === 'number' && Number.isFinite(dueAt) && dueAt > 0 ? String(dueAt) : ''
+    await this.runCommand('set-due', [reminderId, value])
   }
 
   async addSubtask(parentReminderId: string, title: string): Promise<string> {

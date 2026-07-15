@@ -770,6 +770,16 @@ body.col-resizing #agent-list-divider::before {
 }
 .reanalyze-btn:hover:not(:disabled) { color: var(--accent-strong); border-color: var(--accent); background: var(--accent-soft); }
 .reanalyze-btn:disabled { opacity: 0.5; cursor: default; }
+.due-input {
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-family: var(--font-brand);
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  height: 26px;
+}
 
 /* ---------- 상세 2-pane ---------- */
 .detail-2pane { display: flex; flex: 1 1 auto; min-height: 0; }
@@ -1088,6 +1098,11 @@ textarea.dev-extra {
   min-height: 44px;
 }
 textarea.dev-extra:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* 프롬프트로 미리알림 생성: 추가 지시 인라인 입력 */
+.ai-reminder-row { display: flex; align-items: flex-start; gap: var(--sp-2); margin-top: var(--sp-2); }
+.ai-reminder-row textarea.dev-extra { flex: 1 1 auto; margin-top: 0; }
+.ai-reminder-row button { flex: 0 0 auto; white-space: nowrap; }
 
 /* ---------- 의견 더 구하기 (채팅) ---------- */
 #chat-log { display: flex; flex-direction: column; gap: var(--sp-2); max-height: 300px; overflow-y: auto; }

@@ -180,6 +180,9 @@ struct WatchpupRemindersHelper {
                 let notes = arguments[3].trimmingCharacters(in: .whitespacesAndNewlines)
                 reminder.notes = notes.isEmpty ? nil : notes
             }
+            if arguments.count >= 5, let dueDate = dueDate(from: arguments[4]) {
+                reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: dueDate)
+            }
             try store.save(reminder, commit: true)
             return ["ok": true, "id": reminder.calendarItemIdentifier]
 
@@ -206,6 +209,21 @@ struct WatchpupRemindersHelper {
                 throw HelperError.reminderNotFound
             }
             reminder.notes = replacingUserNote(in: reminder.notes ?? "", with: arguments[2])
+            try store.save(reminder, commit: true)
+            return ["ok": true]
+
+        case "set-due":
+            guard arguments.count >= 3 else {
+                throw HelperError.invalidArguments("set-due에는 항목 ID와 마감일이 필요합니다.")
+            }
+            guard let reminder = store.calendarItem(withIdentifier: arguments[1]) as? EKReminder else {
+                throw HelperError.reminderNotFound
+            }
+            if let dueDate = dueDate(from: arguments[2]) {
+                reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: dueDate)
+            } else {
+                reminder.dueDateComponents = nil
+            }
             try store.save(reminder, commit: true)
             return ["ok": true]
 
@@ -265,6 +283,11 @@ struct WatchpupRemindersHelper {
     private static func dateString(_ date: Date?) -> Any {
         guard let date else { return NSNull() }
         return ISO8601DateFormatter().string(from: date)
+    }
+
+    private static func dueDate(from raw: String) -> Date? {
+        guard let milliseconds = Double(raw), milliseconds != 0 else { return nil }
+        return Date(timeIntervalSince1970: milliseconds / 1000)
     }
 
     private static func replacingUserNote(in notes: String, with content: String) -> String {

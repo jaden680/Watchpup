@@ -10,6 +10,9 @@ import { Semaphore } from '../src/core/session/semaphore.js'
 import { StateStore, type NaggingLogEntry, type NaggingLogKind } from '../src/core/state/store.js'
 import { AuditStore } from '../src/core/observability/audit.js'
 import { MentionStore } from '../src/core/state/mentions.js'
+import { ReminderLinkStore, reminderKey } from '../src/core/state/reminder-links.js'
+import { parseSlackThreadPermalink } from '../src/core/slack/permalink.js'
+import { buildMentionReminder, type MentionReminderLink } from '../src/core/work/mention-reminder.js'
 import { LessonStore } from '../src/core/state/lessons.js'
 import { bubbleReady as bubbleReadyText, bubbleFollowup as bubbleFollowupText, bubbleAnalyzing as bubbleAnalyzingText, type BubbleStyle } from '../src/core/presentation/bubble.js'
 import { pickIdleLine } from '../src/core/presentation/idle.js'
@@ -28,11 +31,14 @@ import {
   type SlackNewsNaggingItem,
 } from '../src/core/presentation/nagging.js'
 import { WatchpupGateway } from '../src/core/slack/gateway.js'
+import { generateReminderDraft } from '../src/core/watchpup/pipeline.js'
+import type { ReminderDraftText } from '../src/core/agent/analysis.js'
 import { generateQuips } from '../src/core/watchpup/quips.js'
 import { parseSkillMd } from '../src/core/watchpup/skill-import.js'
 import type { Mention, PetState, AgentStreamEvent, ActivitySession } from '../src/core/types.js'
+import type { WorkItem } from '../src/core/work/types.js'
 import { CMD, EVT } from './ipc.js'
-import type { ChatSendArgs, TodoToggleArgs, SettingsPatch, TokensPatch, TokensStatus, Playbook, ActionRunArgs, ReactionSetArgs } from './ipc.js'
+import type { ChatSendArgs, TodoToggleArgs, SettingsPatch, TokensPatch, TokensStatus, Playbook, ActionRunArgs, ReactionSetArgs, MentionToWorkResult } from './ipc.js'
 import { createPetWindow, createPanelWindow } from './windows.js'
 import { petImagesFromDir, listCodexPets as listCodexPetsAt, resolveCodexPet } from './pets.js'
 import { readGlobalMcpCandidates } from './mcp-import.js'
@@ -90,6 +96,7 @@ async function main(): Promise<void> {
   const config = configStore.get()
   bubbleStyle = config.bubbleStyle
   const mentions = new MentionStore(join(config.dataDir, 'mentions'))
+  const reminderLinks = new ReminderLinkStore(join(config.dataDir, 'reminder-links.json'))
   const sessions = new SessionStore(join(config.dataDir, 'sessions.json'), config.sessionCacheMax, config.sessionIdleMs)
   const state = new StateStore(join(config.dataDir, 'watchpup-state.json'))
   const audit = new AuditStore(join(config.dataDir, 'audit.jsonl'))
@@ -780,6 +787,142 @@ async function main(): Promise<void> {
   ipcMain.handle(CMD.mentionRead, (_e, id: string) => {
     mentions.markRead(id)
     broadcastActivities()
+  })
+  // 이 멘션 스레드에 매핑된 Reminder가 아직 살아있으면 id 반환, 아니면 null(외부 삭제 대비 재검증)
+  ipcMain.handle(CMD.mentionReminderLink, async (_e, mentionId: string): Promise<string | null> => {
+    const mention = mentions.get(mentionId)
+    if (!mention) return null
+    const current = configStore.get()
+    const listId = current.reminderListId
+    if (!listId) return null
+    const key = reminderKey(mention.channel, mention.threadTs)
+    let tasks: WorkItem[]
+    try {
+      tasks = await reminders.tasks(listId, true)
+    } catch (e) {
+      console.error('mention.reminder.link 조회 실패', e)
+      return null
+    }
+    // 1차: 로컬 매핑(reminder-links.json) fast path
+    const candidate = reminderLinks.get(key)
+    if (candidate && candidate.listId === listId && tasks.some((t) => t.id === candidate.reminderId)) {
+      return candidate.reminderId
+    }
+    // 2차: 로컬 매핑이 없거나 stale이면 미리알림 notes의 슬랙 링크를 파싱해 매칭 (기존/외부 생성 TODO 대비)
+    for (const t of tasks) {
+      for (const link of t.links) {
+        if (link.kind !== 'slack') continue
+        let target
+        try {
+          target = parseSlackThreadPermalink(link.url)
+        } catch {
+          continue
+        }
+        if (target.channel === mention.channel.toUpperCase() && target.threadTs === mention.threadTs) {
+          reminderLinks.set(key, { reminderId: t.id, listId })
+          return t.id
+        }
+      }
+    }
+    if (candidate) reminderLinks.delete(key)
+    return null
+  })
+  // 멘션 스레드 → Reminder 생성/갱신 공용 로직: 같은 스레드에 이미 매핑된 Reminder가
+  // 살아있으면(같은 목록 소속 + 아직 존재) 새로 만들지 않고 링크·서브태스크·마감일만 갱신한다.
+  async function upsertMentionReminder(input: {
+    mention: Mention
+    listId: string
+    title: string
+    notes: string
+    links: MentionReminderLink[]
+    subtasks: string[]
+    dueAt?: number
+  }): Promise<MentionToWorkResult> {
+    const { mention, listId, title, notes, links, subtasks, dueAt } = input
+    const key = reminderKey(mention.channel, mention.threadTs)
+    const candidate = reminderLinks.get(key)
+    let existingId: string | undefined
+    let existingTasks: WorkItem[] | undefined
+    if (candidate && candidate.listId === listId) {
+      try {
+        existingTasks = await reminders.tasks(listId, true)
+        if (existingTasks.some((t) => t.id === candidate.reminderId)) existingId = candidate.reminderId
+      } catch (e) {
+        console.error('reminders.tasks 조회 실패', e)
+      }
+    }
+    if (existingId) {
+      for (const link of links) await reminders.appendLink(existingId, link.title, link.url)
+      const existingChildTitles = new Set(
+        (existingTasks ?? []).filter((t) => t.parentId === existingId).map((t) => t.title),
+      )
+      for (const sub of subtasks) {
+        if (!existingChildTitles.has(sub)) await reminders.addSubtask(existingId, sub)
+      }
+      if (typeof dueAt === 'number' && Number.isFinite(dueAt) && dueAt > 0) {
+        await reminders.setDue(existingId, dueAt)
+      }
+      broadcast('work.focus', existingId)
+      return { ok: true, id: existingId, updated: true }
+    }
+    const id = await reminders.create(listId, title, notes, dueAt)
+    reminderLinks.set(key, { reminderId: id, listId })
+    for (const link of links) await reminders.appendLink(id, link.title, link.url)
+    for (const sub of subtasks) await reminders.addSubtask(id, sub)
+    broadcast('work.focus', id)
+    return { ok: true, id }
+  }
+  // 멘션 → work(Reminder) 변환: 목록 미선택이면 생성하지 않고 work 탭 전환만 안내
+  ipcMain.handle(CMD.mentionToWork, async (_e, mentionId: string, dueAt?: number): Promise<MentionToWorkResult> => {
+    const mention = mentions.get(mentionId)
+    if (!mention) throw new Error('멘션을 찾지 못했습니다.')
+    const current = configStore.get()
+    if (!current.reminderListSelectionExplicit || !current.reminderListId) {
+      broadcast('work.focus', 'no-list')
+      return { ok: false, reason: 'no-list' }
+    }
+    const { title, notes, links, subtasks } = buildMentionReminder(mention)
+    return upsertMentionReminder({
+      mention,
+      listId: current.reminderListId,
+      title,
+      notes,
+      links,
+      subtasks,
+      dueAt: typeof dueAt === 'number' && Number.isFinite(dueAt) && dueAt > 0 ? dueAt : undefined,
+    })
+  })
+  // 멘션 → work(Reminder) 변환(LLM 생성): 스레드 내용을 claude로 요약해 초안 생성.
+  // LLM 결과가 비면 buildMentionReminder(고정 템플릿)로 필드별 폴백. 링크는 항상 템플릿 규칙 그대로.
+  ipcMain.handle(CMD.mentionToWorkAI, async (_e, mentionId: string, extra?: string, dueAt?: number): Promise<MentionToWorkResult> => {
+    const mention = mentions.get(mentionId)
+    if (!mention) throw new Error('멘션을 찾지 못했습니다.')
+    const current = configStore.get()
+    if (!current.reminderListSelectionExplicit || !current.reminderListId) {
+      broadcast('work.focus', 'no-list')
+      return { ok: false, reason: 'no-list' }
+    }
+    const fallback = buildMentionReminder(mention)
+    let draft: ReminderDraftText = { title: '', notes: '', subtasks: [] }
+    try {
+      draft = await generateReminderDraft({ config: deps.config, sessions, keychain, lessons }, { mention, extra })
+    } catch (e) {
+      console.error('generateReminderDraft 실패', e)
+    }
+    const title = draft.title.trim() || fallback.title
+    const notes = draft.notes.trim() ? `<note>${draft.notes.trim()}</note>` : fallback.notes
+    const subtasks = draft.subtasks.length ? draft.subtasks : fallback.subtasks
+    const userDueAt = typeof dueAt === 'number' && Number.isFinite(dueAt) && dueAt > 0 ? dueAt : undefined
+    const llmDueAt = typeof draft.dueAt === 'number' && Number.isFinite(draft.dueAt) && draft.dueAt > 0 ? draft.dueAt : undefined
+    return upsertMentionReminder({
+      mention,
+      listId: current.reminderListId,
+      title,
+      notes,
+      links: fallback.links,
+      subtasks,
+      dueAt: userDueAt ?? llmDueAt,
+    })
   })
   ipcMain.handle(CMD.threadImport, (_e, permalink: string) => {
     if (!gateway) return Promise.reject(new Error('Slack 연결을 초기화하지 못했습니다.'))
