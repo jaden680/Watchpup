@@ -10,6 +10,8 @@ const detailEl = document.getElementById('work-detail')
 const hintEl = document.getElementById('work-source-hint')
 const createForm = document.getElementById('work-create-form')
 const createTitle = document.getElementById('work-create-title')
+let workInitialized = false
+let workInitialization = null
 
 function el(tag, className, text) {
   const node = document.createElement(tag)
@@ -426,42 +428,53 @@ export async function refreshWorkView(options = {}) {
   }
 }
 
+async function initializeWorkView() {
+  if (!listSelect) return
+  const config = await window.watchpup.settingsGet()
+  state.sort = config.reminderTaskSortOrder || 'dueDateThenTitle'
+  state.manualOrder = config.reminderTaskManualOrder || []
+  state.includeCompleted = config.showCompletedReminders === true
+  const sortSelect = document.getElementById('work-sort')
+  if (sortSelect) sortSelect.value = state.sort
+  document.getElementById('work-sort-reset')?.classList.toggle('hidden', state.sort !== 'manual')
+  const completedCheckbox = document.getElementById('work-show-completed')
+  if (completedCheckbox) completedCheckbox.checked = state.includeCompleted
+  const result = await window.watchpup.workLists()
+  listSelect.replaceChildren()
+  const placeholder = el('option', '', '미리 알림 목록 선택')
+  placeholder.value = ''
+  placeholder.selected = !result.selectedId
+  placeholder.disabled = true
+  listSelect.append(placeholder)
+  for (const list of result.lists || []) {
+    const count = Number.isFinite(list.openCount) ? ` · ${list.openCount}개` : ''
+    const option = el('option', '', `${list.name} · ${list.account}${count}`)
+    option.value = list.id
+    option.selected = list.id === result.selectedId
+    listSelect.append(option)
+  }
+  if (!result.lists?.length) {
+    hintEl.textContent = '사용 가능한 Reminder 목록이 없습니다.'
+    return
+  }
+  hintEl.textContent = result.selectedId
+    ? '선택한 미리 알림 목록과 동기화합니다.'
+    : `${result.lists.length}개 목록을 찾았습니다. 사용할 목록을 선택해주세요.`
+  if (result.selectedId) await refreshWorkView()
+}
+
 export async function initWorkView() {
   if (!listSelect) return
+  if (workInitialized) return refreshWorkView({ preserveSelection: true })
+  if (workInitialization) return workInitialization
+  workInitialization = initializeWorkView()
   try {
-    const config = await window.watchpup.settingsGet()
-    state.sort = config.reminderTaskSortOrder || 'dueDateThenTitle'
-    state.manualOrder = config.reminderTaskManualOrder || []
-    state.includeCompleted = config.showCompletedReminders === true
-    const sortSelect = document.getElementById('work-sort')
-    if (sortSelect) sortSelect.value = state.sort
-    document.getElementById('work-sort-reset')?.classList.toggle('hidden', state.sort !== 'manual')
-    const completedCheckbox = document.getElementById('work-show-completed')
-    if (completedCheckbox) completedCheckbox.checked = state.includeCompleted
-    const result = await window.watchpup.workLists()
-    listSelect.replaceChildren()
-    const placeholder = el('option', '', '미리 알림 목록 선택')
-    placeholder.value = ''
-    placeholder.selected = !result.selectedId
-    placeholder.disabled = true
-    listSelect.append(placeholder)
-    for (const list of result.lists || []) {
-      const count = Number.isFinite(list.openCount) ? ` · ${list.openCount}개` : ''
-      const option = el('option', '', `${list.name} · ${list.account}${count}`)
-      option.value = list.id
-      option.selected = list.id === result.selectedId
-      listSelect.append(option)
-    }
-    if (!result.lists?.length) {
-      hintEl.textContent = '사용 가능한 Reminder 목록이 없습니다.'
-      return
-    }
-    hintEl.textContent = result.selectedId
-      ? '선택한 미리 알림 목록과 동기화합니다.'
-      : `${result.lists.length}개 목록을 찾았습니다. 사용할 목록을 선택해주세요.`
-    if (result.selectedId) await refreshWorkView()
+    await workInitialization
+    workInitialized = true
   } catch (error) {
     hintEl.textContent = error?.message || 'Reminder 목록을 읽지 못했습니다.'
+  } finally {
+    workInitialization = null
   }
 }
 

@@ -360,7 +360,7 @@ function activateTab(name, { persist = true } = {}) {
   } else if (normalized === 'agent') {
     refreshActivities().catch(() => {})
   } else if (normalized === 'work') {
-    refreshWorkView({ preserveSelection: true }).catch(() => {})
+    initWorkView().catch(() => {})
   }
 }
 
@@ -369,7 +369,6 @@ document.querySelectorAll('.tab').forEach((tab) => {
 })
 
 activateTab(readPanelTab(), { persist: false })
-initWorkView().catch(() => {})
 
 // ESC: 텍스트 입력 중이면 먼저 포커스 해제, 아니면 패널 닫기(숨김)
 document.addEventListener('keydown', (e) => {

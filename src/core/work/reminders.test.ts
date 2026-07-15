@@ -47,6 +47,17 @@ describe('ReminderGateway', () => {
     expect(runner).toHaveBeenCalledWith('upcoming-events', ['1000', '2000'])
   })
 
+  it('캘린더 권한 상태 확인과 명시적 요청을 별도 명령으로 전달한다', async () => {
+    const runner = vi.fn(async (command) => command === 'authorization-status'
+      ? '{"status":"not-determined"}'
+      : '{"status":"authorized"}')
+    const gateway = new ReminderGateway(runner, runner)
+    await expect(gateway.calendarAuthorizationStatus()).resolves.toBe('not-determined')
+    await expect(gateway.requestCalendarAccess()).resolves.toBe('authorized')
+    expect(runner).toHaveBeenNthCalledWith(1, 'authorization-status', ['calendar'])
+    expect(runner).toHaveBeenNthCalledWith(2, 'request-calendar-access', [])
+  })
+
   it('빈 제목의 작업은 생성하지 않는다', async () => {
     const runner = vi.fn()
     const gateway = new ReminderGateway(runner)

@@ -328,7 +328,25 @@ if (slackNewsEnabledInput) slackNewsEnabledInput.addEventListener('change', upda
 if (buildAlertsEnabledInput) buildAlertsEnabledInput.addEventListener('change', updateBuildAlertControls)
 if (xcodeBuildAlertsEnabledInput) xcodeBuildAlertsEnabledInput.addEventListener('change', updateBuildAlertControls)
 if (androidBuildAlertsEnabledInput) androidBuildAlertsEnabledInput.addEventListener('change', updateBuildAlertControls)
-if (naggingCalendarSettings) naggingCalendarSettings.addEventListener('click', () => window.watchpup.openCalendarPrivacy())
+if (naggingCalendarSettings) naggingCalendarSettings.addEventListener('click', async () => {
+  if (naggingCalendarSettings.dataset.openSettings === 'true') {
+    window.watchpup.openCalendarPrivacy()
+    return
+  }
+  naggingCalendarSettings.disabled = true
+  naggingCalendarSettings.textContent = '연결 중…'
+  try {
+    const status = await window.watchpup.requestCalendarAccess()
+    naggingCalendarSettings.textContent = status === 'authorized' ? '캘린더 연결됨' : '캘린더 연결'
+    if (status !== 'authorized' && naggingHint) naggingHint.textContent = '캘린더 권한이 허용되지 않았어요. 시스템 설정에서 Watchpup을 허용해주세요.'
+  } catch (error) {
+    naggingCalendarSettings.textContent = '시스템 설정 열기'
+    if (naggingHint) naggingHint.textContent = error?.message || '캘린더 권한을 확인하지 못했습니다.'
+    naggingCalendarSettings.dataset.openSettings = 'true'
+  } finally {
+    naggingCalendarSettings.disabled = false
+  }
+})
 if (naggingLogRefresh) naggingLogRefresh.addEventListener('click', () => renderNaggingLog())
 if (naggingLogClear) naggingLogClear.addEventListener('click', async () => {
   if (!confirm('잔소리 디버그 로그를 모두 비울까요?')) return
@@ -442,7 +460,7 @@ document.getElementById('jira-connect')?.addEventListener('click', async () => {
     await window.watchpup.connectJira({ site, email, token })
     document.getElementById('jira-token').value = ''
     await renderIntegrations(); await renderMcpList()
-    const verified = await window.watchpup.integrationStatus()
+    const verified = await window.watchpup.integrationStatus(true)
     msg.textContent = verified.jira.authenticated ? '연결됨' : (verified.jira.error || '인증 확인 실패')
   } catch (e) { msg.textContent = '실패: ' + (e?.message || e) }
 })

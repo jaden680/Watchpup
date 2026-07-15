@@ -14,6 +14,7 @@ export const CMD = {
   modelCatalogRefresh: 'model.catalog.refresh',
   naggingLogList: 'nagging.log.list',
   naggingLogClear: 'nagging.log.clear',
+  calendarAccessRequest: 'calendar.access.request',
   tokensGet: 'tokens.get',
   tokensSet: 'tokens.set',
   playbooksList: 'playbooks.list',

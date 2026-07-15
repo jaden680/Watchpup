@@ -51,6 +51,8 @@ import { ClaudeModelCatalogService } from '../src/core/agent/model-catalog.js'
 import { ensureOpenAtLogin } from './login-item.js'
 import { GithubPrNotificationPoller, githubPrNaggingLine } from '../src/core/github/notifications.js'
 import { BuildCompletionPoller, buildCompletionLine, type BuildTool } from '../src/core/build/completion-poller.js'
+import { startupSlackSecrets } from '../src/core/startup/access.js'
+import type { CalendarAuthorizationStatus } from './reminders.js'
 
 let pet: BrowserWindow | null = null
 let panel: BrowserWindow | null = null
@@ -102,6 +104,7 @@ async function main(): Promise<void> {
   const reminders = new ReminderGateway()
   const workStatus = new WorkStatusService(configStore, keychain)
   const modelCatalog = new ClaudeModelCatalogService(join(config.dataDir, 'claude-models.json'))
+  let calendarAccessStatus: CalendarAuthorizationStatus | null = null
   githubPrPoller = new GithubPrNotificationPoller(
     () => {
       const current = configStore.get()
@@ -388,6 +391,10 @@ async function main(): Promise<void> {
   ipcMain.on('calendar.privacy.open', () => {
     void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars')
   })
+  ipcMain.handle(CMD.calendarAccessRequest, async () => {
+    calendarAccessStatus = await reminders.requestCalendarAccess()
+    return calendarAccessStatus
+  })
   ipcMain.on('build.tool.open', (_e, tool: BuildTool) => {
     const bundleId = tool === 'xcode' ? 'com.apple.dt.Xcode' : tool === 'android' ? 'com.google.android.studio' : ''
     if (bundleId) execFile('/usr/bin/open', ['-b', bundleId], () => {})
@@ -414,7 +421,11 @@ async function main(): Promise<void> {
   ipcMain.handle('mention.remove', (_e, id: string) => {
     gateway?.removeMention(id)
   })
-  ipcMain.handle('mention.cleanupFalse', () => (gateway ? gateway.cleanupFalseMentions() : Promise.resolve({ removed: 0, checked: 0 })))
+  ipcMain.handle('mention.cleanupFalse', async () => {
+    if (!gateway) return { removed: 0, checked: 0 }
+    await ensureSlackUserToken()
+    return gateway.cleanupFalseMentions()
+  })
   ipcMain.handle('mention.setCategory', (_e, a: { mentionId: string; category: string }) => {
     gateway?.setCategory(a.mentionId, a.category)
   })
@@ -480,9 +491,11 @@ async function main(): Promise<void> {
     }
   })
   // 스레드 대화 즉석 조회(예전 멘션은 thread가 없을 수 있음)
-  ipcMain.handle('thread.get', (_e, id: string, refresh = false) =>
-    gateway ? gateway.getThread(id, !!refresh) : Promise.resolve([]),
-  )
+  ipcMain.handle('thread.get', async (_e, id: string, refresh = false) => {
+    if (!gateway) return []
+    if (refresh) await ensureSlackUserToken()
+    return gateway.getThread(id, !!refresh)
+  })
 
   // 코드 레포: 목록·추가(폴더 선택)·삭제 — 코드 원인 조사에 사용(claude --add-dir)
   ipcMain.handle('repos.list', () => configStore.get().repos)
@@ -521,6 +534,7 @@ async function main(): Promise<void> {
     if (!gateway) return { error: '먼저 슬랙 연결이 필요합니다 (재시작 후).' }
     if (!cfg.mySlackUserId) return { error: 'mySlackUserId 를 먼저 저장하세요.' }
     try {
+      await ensureSlackUserToken()
       const found = await gateway.researchGroups(cfg.mySlackUserId)
       const myGroups = found.map((g) => ({ id: g.id, handle: g.handle }))
       const c = configStore.update({ myGroups })
@@ -681,7 +695,6 @@ async function main(): Promise<void> {
   let naggingTimer: NodeJS.Timeout | null = null
   let priorityNaggingBusy = false
   let calendarRetryAt = 0
-  let calendarPermissionNagged = false
 
   function showNagging(kind: NaggingLogKind, text: string, payload: Record<string, unknown>, context?: string): void {
     const entry: NaggingLogEntry = { at: Date.now(), kind, text, ...(context ? { context } : {}) }
@@ -719,22 +732,20 @@ async function main(): Promise<void> {
       const now = Date.now()
       if (now >= calendarRetryAt) {
         try {
-          const events = await reminders.upcomingEvents(now - 60_000, now + 6 * 60_000)
-          const event = pickCalendarNaggingEvent(events, state.naggingCalendarNotified(), now)
-          if (event) {
-            state.markNaggingCalendar(calendarEventKey(event), now)
-            showNagging('calendar', calendarNaggingLine(event, now), { calendarEvent: true }, event.title)
-            lastActivity = now
-            return true
+          calendarAccessStatus ??= await reminders.calendarAuthorizationStatus()
+          if (calendarAccessStatus === 'authorized') {
+            const events = await reminders.upcomingEvents(now - 60_000, now + 6 * 60_000)
+            const event = pickCalendarNaggingEvent(events, state.naggingCalendarNotified(), now)
+            if (event) {
+              state.markNaggingCalendar(calendarEventKey(event), now)
+              showNagging('calendar', calendarNaggingLine(event, now), { calendarEvent: true }, event.title)
+              lastActivity = now
+              return true
+            }
           }
         } catch (error) {
           calendarRetryAt = now + 15 * 60_000
           console.warn('잔소리 캘린더 조회 실패', error)
-          if (!calendarPermissionNagged && String((error as Error)?.message || error).includes('캘린더 전체 접근 권한')) {
-            calendarPermissionNagged = true
-            showNagging('calendar', '캘린더 일정도 알려주려면 권한이 필요해요. 눌러서 허용해줘!', { calendarPrivacy: true }, '캘린더 권한')
-            return true
-          }
         }
       }
 
@@ -804,9 +815,10 @@ async function main(): Promise<void> {
   setTimeout(() => { void runPriorityNagging() }, 2_000)
 
   // 4) 감지원 부착: 봇(소켓) / 내 계정 검색 폴링 — config 플래그 + 토큰 존재 시
-  const botToken = await keychain.get(SecretKeys.slackBotToken)
-  const appToken = await keychain.get(SecretKeys.slackAppToken)
-  const userToken = await keychain.get(SecretKeys.slackUserToken)
+  const startupSecrets = startupSlackSecrets(config)
+  const botToken = startupSecrets.bot ? await keychain.get(SecretKeys.slackBotToken) : null
+  const appToken = startupSecrets.app ? await keychain.get(SecretKeys.slackAppToken) : null
+  let userToken = startupSecrets.user ? await keychain.get(SecretKeys.slackUserToken) : null
   if (userToken) gateway.attachUserToken(userToken)
   if (config.enableBot && botToken && appToken) {
     try {
@@ -819,6 +831,13 @@ async function main(): Promise<void> {
     gateway.attachUserSearch(userToken, config.mySlackUserId, config.searchIntervalSec)
   }
 
+  async function ensureSlackUserToken(): Promise<string | null> {
+    if (userToken) return userToken
+    userToken = await keychain.get(SecretKeys.slackUserToken)
+    if (userToken) gateway?.attachUserToken(userToken)
+    return userToken
+  }
+
   // 5) 명령 핸들러 (gateway 생성 이후 등록; gateway가 null이면 안전하게 무동작/기본값 반환)
   ipcMain.handle(CMD.mentionsList, () => mentions.all())
   ipcMain.handle(CMD.mentionGet, (_e, id: string) => mentions.get(id) ?? null)
@@ -826,25 +845,33 @@ async function main(): Promise<void> {
     mentions.markRead(id)
     broadcastActivities()
   })
-  ipcMain.handle(CMD.threadImport, (_e, permalink: string) => {
+  ipcMain.handle(CMD.threadImport, async (_e, permalink: string) => {
     if (!gateway) return Promise.reject(new Error('Slack 연결을 초기화하지 못했습니다.'))
+    await ensureSlackUserToken()
     return gateway.importThread(permalink)
   })
   ipcMain.handle(CMD.todoToggle, (_e, a: TodoToggleArgs) => {
     gateway?.toggleTodo(a.mentionId, a.index)
   })
-  ipcMain.handle(CMD.replyApprove, (_e, id: string) => (gateway ? gateway.approveReply(id) : Promise.resolve({ ts: null })))
-  ipcMain.handle(CMD.reactionSet, (_e, a: ReactionSetArgs) =>
-    gateway ? gateway.setReaction(a.mentionId, a.messageTs, a.name, a.active) : Promise.resolve({ thread: [] }),
-  )
+  ipcMain.handle(CMD.replyApprove, async (_e, id: string) => {
+    if (!gateway) return { ts: null }
+    await ensureSlackUserToken()
+    return gateway.approveReply(id)
+  })
+  ipcMain.handle(CMD.reactionSet, async (_e, a: ReactionSetArgs) => {
+    if (!gateway) return { thread: [] }
+    await ensureSlackUserToken()
+    return gateway.setReaction(a.mentionId, a.messageTs, a.name, a.active)
+  })
   ipcMain.handle('dev.run', (_e, a: { mentionId: string; repoPaths: string[]; extraContext: string }) => {
     if (!gateway) return Promise.resolve()
     send(pet, EVT.chatBubble, { type: 'start' })
     return gateway.runDev(a.mentionId, a.repoPaths || [], a.extraContext || '')
   })
-  ipcMain.handle('reply.rewrite', (_e, a: { mentionId: string; style: string }) =>
-    gateway ? gateway.rewriteDraft(a.mentionId, a.style as never) : Promise.resolve({ text: '' }),
-  )
+  ipcMain.handle('reply.rewrite', async (_e, a: { mentionId: string; style: string }) => {
+    if (!gateway) return { text: '' }
+    return gateway.rewriteDraft(a.mentionId, a.style as never)
+  })
   // 자가발전: 사용자 피드백 반영(→ 교훈 축적 + 즉시 재분석) / 교훈 목록·삭제
   ipcMain.handle('feedback.send', (_e, a: { mentionId: string; text: string }) =>
     gateway ? gateway.feedback(a.mentionId, a.text || '') : Promise.resolve({ lesson: null }),
@@ -957,9 +984,9 @@ async function main(): Promise<void> {
     return readGlobalMcpCandidates().map((c) => ({ ...c, already: existing.has(c.id) }))
   })
   // 간편 연동 (노션·지라) — 토큰 Keychain 저장 + MCP 서버 자동 구성
-  ipcMain.handle('integration.status', async () => {
+  ipcMain.handle('integration.status', async (_e, verify = false) => {
     const status = await integrationStatus(configStore)
-    if (!status.jira.connected) return status
+    if (!verify || !status.jira.connected) return status
     const auth = await workStatus.jiraConnectionStatus()
     return { ...status, jira: { ...status.jira, ...auth } }
   })

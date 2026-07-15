@@ -19,7 +19,7 @@ function serverById(config: WatchpupConfig, id: string) {
   return config.mcpServers.find((s) => s.id === id)
 }
 
-export async function integrationStatus(configStore: ConfigStore): Promise<IntegrationStatus> {
+export function integrationStatus(configStore: ConfigStore): IntegrationStatus {
   const c = configStore.get()
   const jira = serverById(c, 'jira')
   return {

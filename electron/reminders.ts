@@ -9,9 +9,10 @@ import type { NaggingCalendarEvent } from '../src/core/presentation/nagging.js'
 
 const execFileAsync = promisify(execFile)
 
-export type ReminderCommand = 'lists' | 'tasks' | 'create' | 'add-subtask' | 'update-title' | 'update-user-note' | 'set-completed' | 'append-link' | 'upcoming-events'
+export type CalendarAuthorizationStatus = 'not-determined' | 'restricted' | 'denied' | 'write-only' | 'authorized' | 'unknown'
+export type ReminderCommand = 'lists' | 'tasks' | 'create' | 'add-subtask' | 'update-title' | 'update-user-note' | 'set-completed' | 'append-link' | 'upcoming-events' | 'authorization-status' | 'request-calendar-access'
 export type ReminderCommandRunner = (command: ReminderCommand, args: string[]) => Promise<string>
-export type CalendarCommandRunner = (command: 'upcoming-events', args: string[]) => Promise<string>
+export type CalendarCommandRunner = (command: 'upcoming-events' | 'authorization-status' | 'request-calendar-access', args: string[]) => Promise<string>
 
 function resolveHelperPath(): string {
   const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
@@ -105,6 +106,16 @@ export class ReminderGateway {
       .sort((a, b) => a.startAt - b.startAt)
   }
 
+  async calendarAuthorizationStatus(): Promise<CalendarAuthorizationStatus> {
+    const raw = await this.runCalendarCommand('authorization-status', ['calendar'])
+    return authorizationStatus(raw)
+  }
+
+  async requestCalendarAccess(): Promise<CalendarAuthorizationStatus> {
+    const raw = await this.runCalendarCommand('request-calendar-access', [])
+    return authorizationStatus(raw)
+  }
+
   async tasks(listId: string, includeCompleted = false): Promise<WorkItem[]> {
     const raw = await this.runCommand('tasks', [listId, String(includeCompleted)])
     const rows = JSON.parse(raw || '[]') as Array<Record<string, unknown>>
@@ -172,4 +183,13 @@ export class ReminderGateway {
     const safeTitle = title.trim().replace(/[\[\]]/g, '') || parsed.hostname
     await this.runCommand('append-link', [reminderId, safeTitle, parsed.toString()])
   }
+}
+
+function authorizationStatus(raw: string): CalendarAuthorizationStatus {
+  const parsed = JSON.parse(raw || '{}') as { status?: unknown }
+  const status = parsed.status
+  return status === 'not-determined' || status === 'restricted' || status === 'denied'
+    || status === 'write-only' || status === 'authorized'
+    ? status
+    : 'unknown'
 }

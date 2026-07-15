@@ -30,7 +30,8 @@ describe('잔소리 베타 설정', () => {
     expect(priorities[2]).toContain('GitHub PR')
     expect(priorities[3]).toContain('Slack 새 소식')
     expect(priorities[4]).toContain('미완료 Work 작업')
-    expect(document.getElementById('nagging-calendar-settings')?.textContent).toContain('캘린더 권한')
+    expect(document.getElementById('nagging-calendar-settings')?.textContent).toContain('캘린더 연결')
+    expect(document.querySelector('.nagging-calendar-access')?.textContent).toContain('쓰고 싶을 때만')
   })
 
   it('GitHub PR 확인은 기본으로 켜져 있고 로컬 gh 로그인을 사용한다', () => {

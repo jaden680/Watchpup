@@ -56,6 +56,19 @@ struct WatchpupRemindersHelper {
             throw HelperError.invalidArguments("명령이 없습니다.")
         }
         let store = EKEventStore()
+        if command == "authorization-status" {
+            guard arguments.count >= 2 else {
+                throw HelperError.invalidArguments("authorization-status에는 calendar 또는 reminders가 필요합니다.")
+            }
+            let entityType: EKEntityType = arguments[1] == "calendar" ? .event : .reminder
+            return ["status": authorizationStatus(entityType)]
+        }
+        if command == "request-calendar-access" {
+            guard try await requestCalendarAccess(store) else {
+                throw HelperError.calendarAccessDenied
+            }
+            return ["status": authorizationStatus(.event)]
+        }
         if command == "upcoming-events" {
             guard try await requestCalendarAccess(store) else {
                 throw HelperError.calendarAccessDenied
@@ -252,6 +265,23 @@ struct WatchpupRemindersHelper {
 
     private static func requestCalendarAccess(_ store: EKEventStore) async throws -> Bool {
         try await store.requestFullAccessToEvents()
+    }
+
+    private static func authorizationStatus(_ entityType: EKEntityType) -> String {
+        switch EKEventStore.authorizationStatus(for: entityType) {
+        case .notDetermined:
+            return "not-determined"
+        case .restricted:
+            return "restricted"
+        case .denied:
+            return "denied"
+        case .writeOnly:
+            return "write-only"
+        case .authorized, .fullAccess:
+            return "authorized"
+        @unknown default:
+            return "unknown"
+        }
     }
 
     private static func fetchReminders(_ store: EKEventStore, predicate: NSPredicate) async -> [EKReminder] {

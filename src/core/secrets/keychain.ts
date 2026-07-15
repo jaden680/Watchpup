@@ -114,6 +114,20 @@ export class Keychain {
   }
 
   async has(key: string): Promise<boolean> {
+    // 값(-w)을 복호화하지 않고 항목 메타데이터만 조회한다. 설정 화면의
+    // 저장 여부 표시 때문에 Keychain 접근 허용 창이 뜨는 일을 피한다.
+    if (process.platform === 'darwin') {
+      try {
+        execFileSync('/usr/bin/security', [
+          'find-generic-password',
+          '-a', key,
+          '-s', this.service,
+        ], { stdio: 'ignore' })
+        return true
+      } catch {
+        return false
+      }
+    }
     return (await this.get(key)) != null
   }
 
