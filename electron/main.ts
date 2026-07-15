@@ -249,7 +249,6 @@ async function main(): Promise<void> {
     const win = activePanel()
     if (!win) return
     activatePanel(win)
-    send(win, 'panel.shown', {}) // 열 때 항상 멘션 목록부터(직전 설정 탭 잔상 방지)
     clearPanelBadge()
   }
 

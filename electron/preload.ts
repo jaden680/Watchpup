@@ -113,7 +113,6 @@ contextBridge.exposeInMainWorld('watchpup', {
   hidePanel: () => ipcRenderer.send('panel.hide'),
   minimizePanel: () => ipcRenderer.send('panel.minimize'),
   maximizePanel: () => ipcRenderer.send('panel.maximize'),
-  onPanelShown: (cb: () => void) => sub('panel.shown', () => cb()),
   openMention: (id: string) => ipcRenderer.send('pet.openMention', id),
   onMentionFocus: (cb: (id: unknown) => void) => sub('mention.focus', cb),
   setTracked: (mentionId: string, tracked: boolean) => ipcRenderer.invoke('mention.setTracked', { mentionId, tracked }),
