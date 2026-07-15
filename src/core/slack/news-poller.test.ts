@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SlackNewsPoller, slackNewsSubscriptions } from './news-poller.js'
+import { SLACK_NEWS_POLL_INTERVAL_SEC, SlackNewsPoller, slackNewsSubscriptions } from './news-poller.js'
 
 describe('slackNewsSubscriptions', () => {
   it('채널과 키워드를 정리하고 중복을 제거한다', () => {
@@ -13,6 +13,10 @@ describe('slackNewsSubscriptions', () => {
 })
 
 describe('SlackNewsPoller', () => {
+  it('구독 채널과 키워드는 최소 20분 간격으로 확인한다', () => {
+    expect(SLACK_NEWS_POLL_INTERVAL_SEC).toBe(20 * 60)
+  })
+
   it('첫 조회는 기준점만 저장하고 이후 새 루트 메시지만 전달한다', async () => {
     const search = vi.fn()
       .mockResolvedValueOnce({ messages: { matches: [{ channel: { id: 'C1', name: 'all_random' }, ts: '100.000001', text: '기존 글', permalink: 'https://slack/old' }] } })

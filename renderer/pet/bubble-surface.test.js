@@ -85,7 +85,7 @@ describe('bubbleOpenTarget', () => {
     expect(bubbleOpenTarget(null, null, null, false, true)).toEqual({ kind: 'calendar-privacy' })
   })
 
-  it('Slack 소식 잔소리는 원문 링크를 연다', () => {
+  it('Slack이나 GitHub 잔소리는 외부 원문 링크를 연다', () => {
     expect(bubbleOpenTarget(null, null, null, false, false, 'https://workspace.slack.com/archives/C1/p1')).toEqual({
       kind: 'external',
       url: 'https://workspace.slack.com/archives/C1/p1',

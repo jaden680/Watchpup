@@ -5,6 +5,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { compareSlackTs } from '../slack/timestamp.js'
 import type { AgentNaggingPending, SlackNewsNaggingItem } from '../presentation/nagging.js'
+import type { GithubPrNaggingItem } from '../github/notifications.js'
 
 export interface WindowBounds {
   x?: number
@@ -13,7 +14,7 @@ export interface WindowBounds {
   height: number
 }
 
-export type NaggingLogKind = 'calendar' | 'agent' | 'slack' | 'work' | 'general'
+export type NaggingLogKind = 'calendar' | 'agent' | 'github' | 'slack' | 'work' | 'general'
 
 export interface NaggingLogEntry {
   at: number
@@ -42,6 +43,8 @@ export interface WatchpupState {
     calendarNotified?: Record<string, number>
     slackNewsCursor?: Record<string, string>
     slackNewsQueue?: SlackNewsNaggingItem[]
+    githubPrQueue?: GithubPrNaggingItem[]
+    githubPrSeen?: Record<string, number>
     log?: NaggingLogEntry[]
   }
 }
@@ -176,6 +179,49 @@ export class StateStore {
     const nagging = this.state.nagging
     if (!nagging?.slackNewsQueue?.length) return
     nagging.slackNewsQueue = []
+    this.persist()
+  }
+
+  enqueueNaggingGithubPr(item: GithubPrNaggingItem): void {
+    const nagging = (this.state.nagging ??= {})
+    const seenAt = nagging.githubPrSeen?.[item.id]
+    if (Number.isFinite(seenAt) && seenAt! >= item.updatedAt) return
+    const queue = (nagging.githubPrQueue ??= []).filter((candidate) => candidate.id !== item.id)
+    queue.push(item)
+    nagging.githubPrQueue = queue
+      .filter((candidate) => Number.isFinite(candidate.updatedAt))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, 20)
+    this.persist()
+  }
+  naggingGithubPr(now = Date.now()): GithubPrNaggingItem[] {
+    const nagging = (this.state.nagging ??= {})
+    const before = nagging.githubPrQueue ?? []
+    const cutoff = now - 72 * 60 * 60 * 1000
+    const queue = before.filter((candidate) => Number.isFinite(candidate.updatedAt) && candidate.updatedAt >= cutoff)
+    if (queue.length !== before.length) {
+      nagging.githubPrQueue = queue
+      this.persist()
+    }
+    return structuredClone(queue)
+  }
+  dismissNaggingGithubPr(id: string): void {
+    const nagging = this.state.nagging
+    const item = nagging?.githubPrQueue?.find((candidate) => candidate.id === id)
+    if (!nagging || !item) return
+    nagging.githubPrQueue = nagging.githubPrQueue!.filter((candidate) => candidate.id !== id)
+    const seen = (nagging.githubPrSeen ??= {})
+    seen[id] = item.updatedAt
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
+    for (const [notificationId, updatedAt] of Object.entries(seen)) {
+      if (!Number.isFinite(updatedAt) || updatedAt < cutoff) delete seen[notificationId]
+    }
+    this.persist()
+  }
+  clearNaggingGithubPr(): void {
+    const nagging = this.state.nagging
+    if (!nagging?.githubPrQueue?.length) return
+    nagging.githubPrQueue = []
     this.persist()
   }
 

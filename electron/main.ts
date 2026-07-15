@@ -48,11 +48,13 @@ import { WorkStatusService } from './work-status.js'
 import { focusVisiblePanel, setPanelSwitcherVisibility } from './panel-activation.js'
 import { ClaudeModelCatalogService } from '../src/core/agent/model-catalog.js'
 import { ensureOpenAtLogin } from './login-item.js'
+import { GithubPrNotificationPoller, githubPrNaggingLine } from '../src/core/github/notifications.js'
 
 let pet: BrowserWindow | null = null
 let panel: BrowserWindow | null = null
 let gateway: WatchpupGateway | null = null
 let agentPoller: LocalAgentPoller | null = null
+let githubPrPoller: GithubPrNotificationPoller | null = null
 let unread = 0
 let lastActivity = Date.now()
 let isQuitting = false
@@ -97,6 +99,13 @@ async function main(): Promise<void> {
   const reminders = new ReminderGateway()
   const workStatus = new WorkStatusService(configStore, keychain)
   const modelCatalog = new ClaudeModelCatalogService(join(config.dataDir, 'claude-models.json'))
+  githubPrPoller = new GithubPrNotificationPoller(
+    () => {
+      const current = configStore.get()
+      return { enabled: current.naggingEnabled && current.githubPrNaggingEnabled }
+    },
+    (item) => state.enqueueNaggingGithubPr(item),
+  )
   const deps = {
     config,
     sessions,
@@ -643,7 +652,7 @@ async function main(): Promise<void> {
     lastActivity = Date.now() // 다음 혼잣말까지 간격 확보
   }, 4 * 60 * 1000)
 
-  // 베타 `잔소리`: 캘린더 임박 일정 → 확인하지 않은 Agent 완료 → Slack 소식/Work 순서로 상기한다.
+  // 베타 `잔소리`: 캘린더 임박 일정 → 확인하지 않은 Agent 완료 → GitHub PR/Slack 소식/Work 순서로 상기한다.
   // 다음 예정 시각과 이미 알린 대상을 저장해 앱 재실행 뒤에도 중복 알림을 피한다.
   let naggingTimer: NodeJS.Timeout | null = null
   let priorityNaggingBusy = false
@@ -728,15 +737,25 @@ async function main(): Promise<void> {
       if (!current.naggingEnabled || !pet || pet.isDestroyed()) return
       if (await runPriorityNagging()) return
       const items = current.reminderListId
-        ? await reminders.tasks(current.reminderListId, false)
+        ? await reminders.tasks(current.reminderListId, false).catch((error) => {
+          console.warn('잔소리 Work 작업 조회 실패', error)
+          return []
+        })
         : []
       if (!configStore.get().naggingEnabled) return
       const item = pickNaggingWorkItem(items, state.workTouchedAt(), state.naggingRecentTaskIds())
       const news = current.slackNewsEnabled ? pickSlackNewsNagging(state.naggingSlackNews()) : null
-      const source = chooseNaggingSource(!!item, !!news)
+      const githubPr = current.githubPrNaggingEnabled ? state.naggingGithubPr()[0] ?? null : null
+      const source = chooseNaggingSource(!!item, !!news, !!githubPr)
+      if (source === 'github' && githubPr) {
+        state.dismissNaggingGithubPr(githubPr.id)
+        showNagging('github', githubPrNaggingLine(githubPr), { externalUrl: githubPr.url }, `${githubPr.repository} #${githubPr.number}`)
+        lastActivity = Date.now()
+        return
+      }
       if (source === 'slack' && news) {
         state.dismissNaggingSlackNews(news.id)
-        showNagging('slack', slackNewsNaggingLine(news), { slackNewsUrl: news.permalink }, `#${news.channelName}`)
+        showNagging('slack', slackNewsNaggingLine(news), { externalUrl: news.permalink }, `#${news.channelName}`)
         lastActivity = Date.now()
         return
       }
@@ -755,6 +774,7 @@ async function main(): Promise<void> {
   }
 
   scheduleNagging()
+  githubPrPoller.start()
   setInterval(() => { void runPriorityNagging() }, 30_000)
   setTimeout(() => { void runPriorityNagging() }, 2_000)
 
@@ -850,9 +870,13 @@ async function main(): Promise<void> {
     send(pet, EVT.petImages, petImagesFromDir(c.petImageDir))
     send(pet, EVT.petCodex, resolveCodexPet(c.petCodexDir))
     if (pet && !pet.isDestroyed()) pet.setAlwaysOnTop(c.petAlwaysOnTop) // 즉시 반영
-    if ('naggingEnabled' in patch || 'naggingMinMinutes' in patch || 'naggingMaxMinutes' in patch || 'slackNewsEnabled' in patch) {
+    if ('naggingEnabled' in patch || 'naggingMinMinutes' in patch || 'naggingMaxMinutes' in patch || 'githubPrNaggingEnabled' in patch || 'slackNewsEnabled' in patch) {
       scheduleNagging(true)
       if (c.naggingEnabled) void runPriorityNagging()
+    }
+    if ('naggingEnabled' in patch || 'githubPrNaggingEnabled' in patch) {
+      if (!c.naggingEnabled || !c.githubPrNaggingEnabled) state.clearNaggingGithubPr()
+      else void githubPrPoller?.pollNow()
     }
     if ('naggingEnabled' in patch || 'slackNewsEnabled' in patch || 'slackNewsChannels' in patch || 'slackNewsKeywords' in patch) {
       if (slackNewsChanged) state.clearNaggingSlackNews()
@@ -950,6 +974,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true
   agentPoller?.stop()
+  githubPrPoller?.stop()
   gateway?.stop().catch(() => {})
 })
 

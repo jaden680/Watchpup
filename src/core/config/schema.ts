@@ -87,6 +87,8 @@ export const watchpupConfigSchema = z.object({
   naggingEnabled: z.boolean().default(false),
   naggingMinMinutes: z.number().int().min(1).max(120).default(5),
   naggingMaxMinutes: z.number().int().min(1).max(120).default(12),
+  // 로컬 GitHub CLI의 읽지 않은 최근 PR 알림을 잔소리 후보에 섞는다.
+  githubPrNaggingEnabled: z.boolean().default(true),
   // 구독한 Slack 채널·키워드의 새 루트 메시지를 무작위 잔소리에 섞는다.
   slackNewsEnabled: z.boolean().default(false),
   slackNewsChannels: z.array(z.string()).default(['all_전사공유', 'all_전사공지', 'all_random']),

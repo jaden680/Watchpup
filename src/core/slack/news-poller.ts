@@ -3,6 +3,8 @@ import { logger } from '../observability/logger.js'
 import { formatSlackPlain, getPermalink } from './context.js'
 import { compareSlackTs, latestSlackTs } from './timestamp.js'
 
+export const SLACK_NEWS_POLL_INTERVAL_SEC = 20 * 60
+
 export interface SlackNewsConfig {
   enabled: boolean
   channels: string[]
@@ -87,8 +89,9 @@ export class SlackNewsPoller {
   start(): void {
     if (this.timer) return
     void this.pollNow()
-    this.timer = setInterval(() => void this.pollNow(), Math.max(120, this.intervalSec) * 1000)
-    logger.info('SlackNewsPoller 시작', { intervalSec: Math.max(120, this.intervalSec) })
+    const intervalSec = Math.max(SLACK_NEWS_POLL_INTERVAL_SEC, this.intervalSec)
+    this.timer = setInterval(() => void this.pollNow(), intervalSec * 1000)
+    logger.info('SlackNewsPoller 시작', { intervalSec })
   }
 
   stop(): void {

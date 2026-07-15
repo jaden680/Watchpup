@@ -40,11 +40,12 @@ describe('nagging presentation', () => {
     expect(picked?.id).toBe('b')
   })
 
-  it('Work와 Slack이 있어도 일반 잔소리를 일정 비율로 섞는다', () => {
-    expect(chooseNaggingSource(true, true, () => 0.2)).toBe('slack')
-    expect(chooseNaggingSource(true, true, () => 0.5)).toBe('work')
-    expect(chooseNaggingSource(true, true, () => 0.9)).toBe('general')
-    expect(chooseNaggingSource(true, false, () => 0.9)).toBe('general')
+  it('Work, Slack, GitHub PR이 있어도 일반 잔소리를 일정 비율로 섞는다', () => {
+    expect(chooseNaggingSource(true, true, true, () => 0.1)).toBe('github')
+    expect(chooseNaggingSource(true, true, true, () => 0.4)).toBe('slack')
+    expect(chooseNaggingSource(true, true, true, () => 0.7)).toBe('work')
+    expect(chooseNaggingSource(true, true, true, () => 0.95)).toBe('general')
+    expect(chooseNaggingSource(true, false, false, () => 0.9)).toBe('general')
   })
 
   it('작업이 없으면 일반 잔소리를 만든다', () => {

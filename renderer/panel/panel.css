@@ -1400,11 +1400,14 @@ button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); 
 }
 .nagging-calendar-access { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--fg-faint); font-size: 11px; }
 .nagging-calendar-access button { padding: 6px 9px; font-size: 10.5px; }
-.nagging-slack-news {
+.nagging-slack-news,
+.nagging-github-pr {
   display: grid; gap: 9px; padding: 11px;
   border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-sunken);
 }
 #settings-form .nagging-slack-news > .checkbox { font-size: 12px; font-weight: 700; }
+#settings-form .nagging-github-pr > .checkbox { font-size: 12px; font-weight: 700; }
+.nagging-github-pr .hint { margin: 0; }
 .nagging-slack-subscriptions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .nagging-slack-subscriptions textarea { min-height: 64px; resize: vertical; }
 .nagging-slack-news .hint { margin: 0; }
@@ -1419,6 +1422,7 @@ button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); 
 .nagging-card.is-disabled .nagging-priorities,
 .nagging-card.is-disabled .nagging-calendar-access { opacity: 0.45; }
 .nagging-card.is-disabled .nagging-slack-news { opacity: 0.45; }
+.nagging-card.is-disabled .nagging-github-pr { opacity: 0.45; }
 .nagging-log-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .nagging-log-header p { display: grid; gap: 3px; margin: 0; color: var(--fg-faint); font-size: 10.5px; }
 .nagging-log-header strong { color: var(--fg); font-size: 12px; }
@@ -1433,6 +1437,7 @@ button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); 
 .nagging-log-meta { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--fg-faint); font: 500 9.5px var(--font-mono); }
 .nagging-log-kind { padding: 3px 6px; border-radius: 999px; color: var(--accent-strong); background: var(--accent-soft); font-weight: 700; }
 .nagging-log-kind.kind-agent { color: #8eeab7; background: rgba(80, 216, 144, 0.1); }
+.nagging-log-kind.kind-github { color: #a8c7ff; background: rgba(82, 128, 214, 0.13); }
 .nagging-log-kind.kind-slack { color: #d6a8ef; background: rgba(173, 93, 202, 0.12); }
 .nagging-log-kind.kind-calendar { color: #ffb09d; background: rgba(255, 107, 107, 0.11); }
 .nagging-log-context { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-muted); }

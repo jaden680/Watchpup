@@ -1,11 +1,8 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import type { ConfigStore } from '../src/core/config/store.js'
 import type { Keychain } from '../src/core/secrets/keychain.js'
+import { runGh, type GhRunner } from '../src/core/github/notifications.js'
 import { parseGithubLink, parseJiraLink } from '../src/core/work/links.js'
 import { JIRA_KEY } from './integrations.js'
-
-const execFileAsync = promisify(execFile)
 
 export interface WorkLinkAction {
   id: string
@@ -21,16 +18,7 @@ export interface WorkLinkStatus {
   actions: WorkLinkAction[]
 }
 
-export type GhRunner = (args: string[]) => Promise<string>
 export type WorkFetch = (input: string, init?: RequestInit) => Promise<Response>
-
-const defaultGhRunner: GhRunner = async (args) => {
-  const env = { ...process.env }
-  delete env.GH_TOKEN
-  delete env.GITHUB_TOKEN
-  const { stdout } = await execFileAsync('gh', args, { env, timeout: 30_000, maxBuffer: 8 * 1024 * 1024 })
-  return stdout
-}
 
 function configuredJira(configStore: ConfigStore): { host: string; email: string } | null {
   const jira = configStore.get().mcpServers.find((server) => server.id === 'jira' && server.enabled)
@@ -53,7 +41,7 @@ export class WorkStatusService {
   constructor(
     private readonly configStore: ConfigStore,
     private readonly keychain: Keychain,
-    private readonly gh: GhRunner = defaultGhRunner,
+    private readonly gh: GhRunner = runGh,
     private readonly fetcher: WorkFetch = fetch,
   ) {}
 

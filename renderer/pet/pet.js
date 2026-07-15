@@ -473,7 +473,7 @@ let bubbleWorkItemId = null
 let bubbleActivityId = null
 let bubbleCalendarEvent = false
 let bubbleCalendarPrivacy = false
-let bubbleSlackNewsUrl = null
+let bubbleExternalUrl = null
 window.watchpup.onBubble((payload) => {
   // payload: string(구버전/idle) 또는 연결 대상이 포함된 말풍선 객체.
   const text = typeof payload === 'string' ? payload : payload && payload.text
@@ -482,7 +482,7 @@ window.watchpup.onBubble((payload) => {
   const activityId = typeof payload === 'object' && payload ? payload.activityId : null
   const calendarEvent = typeof payload === 'object' && payload ? payload.calendarEvent === true : false
   const calendarPrivacy = typeof payload === 'object' && payload ? payload.calendarPrivacy === true : false
-  const slackNewsUrl = typeof payload === 'object' && payload ? payload.slackNewsUrl : null
+  const externalUrl = typeof payload === 'object' && payload ? (payload.externalUrl || payload.slackNewsUrl) : null
   if (typeof text !== 'string' || !text) return
   if (!canIncomingBubbleReplaceStream(chatStreaming, chatBuf)) return
   if (chatStreaming) finishChatStreaming()
@@ -491,10 +491,10 @@ window.watchpup.onBubble((payload) => {
   bubbleActivityId = activityId || null
   bubbleCalendarEvent = calendarEvent
   bubbleCalendarPrivacy = calendarPrivacy
-  bubbleSlackNewsUrl = typeof slackNewsUrl === 'string' ? slackNewsUrl : null
+  bubbleExternalUrl = typeof externalUrl === 'string' ? externalUrl : null
   bubble.classList.remove('streaming')
   hudMessage.classList.remove('streaming')
-  const clickable = !!bubbleMentionId || !!bubbleWorkItemId || !!bubbleActivityId || bubbleCalendarEvent || bubbleCalendarPrivacy || !!bubbleSlackNewsUrl
+  const clickable = !!bubbleMentionId || !!bubbleWorkItemId || !!bubbleActivityId || bubbleCalendarEvent || bubbleCalendarPrivacy || !!bubbleExternalUrl
   bubble.classList.toggle('clickable', clickable)
   hudMessage.classList.toggle('clickable', clickable)
   showBubble(text, 30000)
@@ -542,7 +542,7 @@ activityHud.addEventListener('click', (event) => {
 })
 // 말풍선 클릭 → 스레드가 연결돼 있으면 그 스레드를 열고, 아니면 패널을 연다.
 function openBubbleTarget() {
-  const target = bubbleOpenTarget(bubbleMentionId, bubbleWorkItemId, bubbleActivityId, bubbleCalendarEvent, bubbleCalendarPrivacy, bubbleSlackNewsUrl)
+  const target = bubbleOpenTarget(bubbleMentionId, bubbleWorkItemId, bubbleActivityId, bubbleCalendarEvent, bubbleCalendarPrivacy, bubbleExternalUrl)
   if (target.kind === 'mention') window.watchpup.openMention(target.id)
   else if (target.kind === 'work') window.watchpup.openWorkItem(target.id)
   else if (target.kind === 'activity') window.watchpup.openActivityDetail(target.id)

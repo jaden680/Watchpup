@@ -375,16 +375,24 @@
                 <input type="checkbox" name="naggingEnabled" />
                 시도 때도 없이 말 걸기
               </label>
-              <p class="nagging-copy">놓치기 쉬운 타이밍을 먼저 잡고, 평소에는 Work 작업이나 구독한 Slack 새 소식을 몇 분 단위로 다시 꺼내줘요. 기본값은 꺼짐입니다.</p>
+              <p class="nagging-copy">놓치기 쉬운 타이밍을 먼저 잡고, 평소에는 Work 작업이나 GitHub PR, 구독한 Slack 새 소식을 몇 분 단위로 다시 꺼내줘요. 기본값은 꺼짐입니다.</p>
               <ul class="nagging-priorities" aria-label="잔소리 우선순위">
                 <li><span>1</span>캘린더 일정 5분 전</li>
                 <li><span>2</span>Agent 작업 종료 후 반응이 없을 때</li>
-                <li><span>3</span>구독한 Slack 새 소식</li>
-                <li><span>4</span>최근 열어본 미완료 Work 작업</li>
+                <li><span>3</span>안 읽은 GitHub PR</li>
+                <li><span>4</span>구독한 Slack 새 소식</li>
+                <li><span>5</span>최근 열어본 미완료 Work 작업</li>
               </ul>
               <div class="nagging-calendar-access">
                 <span>처음 활성화하면 macOS 캘린더 접근 권한을 요청합니다.</span>
                 <button type="button" id="nagging-calendar-settings">캘린더 권한 설정</button>
+              </div>
+              <div class="nagging-github-pr">
+                <label class="checkbox">
+                  <input type="checkbox" name="githubPrNaggingEnabled" checked />
+                  안 읽은 GitHub PR도 가끔 확인
+                </label>
+                <p class="hint">로컬 <code>gh</code> 로그인으로 최근 72시간의 읽지 않은 PR 알림을 20분마다 확인합니다. 한 번 보여준 PR 업데이트는 반복하지 않아요.</p>
               </div>
               <div class="nagging-slack-news">
                 <label class="checkbox">
@@ -401,7 +409,7 @@
                     <textarea name="slackNewsKeywords" rows="3" placeholder="iOS, 장애, 신규 기능"></textarea>
                   </label>
                 </div>
-                <p class="hint">쉼표나 줄바꿈으로 구분합니다. 처음 켤 때는 현재 최신 글을 기준으로 잡고, 이후 새 루트 글만 알려줘요. Slack User Token의 <code>search:read</code> 권한이 필요합니다.</p>
+                <p class="hint">쉼표나 줄바꿈으로 구분합니다. 각 채널·키워드는 20분마다 확인해요. 처음 켤 때는 현재 최신 글을 기준으로 잡고, 이후 새 루트 글만 알려줍니다. Slack User Token의 <code>search:read</code> 권한이 필요합니다.</p>
               </div>
               <div class="nagging-interval-row">
                 <label>
@@ -414,7 +422,7 @@
                   <span class="nagging-number"><input type="number" name="naggingMaxMinutes" min="1" max="120" step="1" value="12" /><span>분</span></span>
                 </label>
               </div>
-              <p id="nagging-hint" class="hint">활성화하면 캘린더 접근 권한을 요청하고, 5~12분 사이의 랜덤한 시점에 Work나 Slack 소식 말풍선이 나타납니다.</p>
+              <p id="nagging-hint" class="hint">활성화하면 캘린더 접근 권한을 요청하고, 5~12분 사이의 랜덤한 시점에 Work·GitHub PR·Slack 소식 말풍선이 나타납니다.</p>
             </fieldset>
             <fieldset class="nagging-debug-card">
               <legend>디버그 로그</legend>

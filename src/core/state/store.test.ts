@@ -97,6 +97,23 @@ describe('StateStore', () => {
     restored.clearNaggingLog()
     expect(new StateStore(path).naggingLog()).toEqual([])
   })
+  it('GitHub PR 알림의 업데이트별 중복을 막고 확인 상태를 저장한다', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'watchpup-st-')), 'state.json')
+    const s = new StateStore(path)
+    const now = Date.now()
+    const item = { id: 'notification-1', title: 'PR', repository: 'owner/repo', number: 42, url: 'https://github.com/owner/repo/pull/42', reason: 'subscribed', updatedAt: now }
+    s.enqueueNaggingGithubPr(item)
+    s.enqueueNaggingGithubPr(item)
+    expect(s.naggingGithubPr(now)).toEqual([item])
+
+    s.dismissNaggingGithubPr(item.id)
+    s.enqueueNaggingGithubPr(item)
+    expect(new StateStore(path).naggingGithubPr(now)).toEqual([])
+
+    const updated = { ...item, title: 'PR 업데이트', updatedAt: now + 1 }
+    s.enqueueNaggingGithubPr(updated)
+    expect(new StateStore(path).naggingGithubPr(now + 1)).toEqual([updated])
+  })
   it('remembers the latest three distinct Work nags and migrates the previous task id', () => {
     const path = join(mkdtempSync(join(tmpdir(), 'watchpup-st-')), 'state.json')
     const s = new StateStore(path)

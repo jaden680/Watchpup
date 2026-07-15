@@ -35,7 +35,7 @@ export interface SlackNewsNaggingItem {
   postedAt: number
 }
 
-export type NaggingSource = 'slack' | 'work' | 'general'
+export type NaggingSource = 'github' | 'slack' | 'work' | 'general'
 
 const TASK_LINES: ReadonlyArray<(title: string) => string> = [
   (title) => `“${title}” 아직 머릿속에 있죠?`,
@@ -113,16 +113,21 @@ export function pickNaggingWorkItem(
 export function chooseNaggingSource(
   hasWork: boolean,
   hasSlackNews: boolean,
+  hasGithubPr: boolean,
   rand: () => number = Math.random,
 ): NaggingSource {
-  const ratio = Math.max(0, Math.min(0.999999, rand()))
-  if (hasWork && hasSlackNews) {
-    if (ratio < 0.35) return 'slack'
-    if (ratio < 0.85) return 'work'
-    return 'general'
+  const candidates: Array<{ source: NaggingSource; weight: number }> = [
+    ...(hasGithubPr ? [{ source: 'github' as const, weight: 35 }] : []),
+    ...(hasSlackNews ? [{ source: 'slack' as const, weight: 30 }] : []),
+    ...(hasWork ? [{ source: 'work' as const, weight: 40 }] : []),
+    { source: 'general', weight: 15 },
+  ]
+  const total = candidates.reduce((sum, candidate) => sum + candidate.weight, 0)
+  let cursor = Math.max(0, Math.min(0.999999, rand())) * total
+  for (const candidate of candidates) {
+    cursor -= candidate.weight
+    if (cursor < 0) return candidate.source
   }
-  if (hasSlackNews) return ratio < 0.7 ? 'slack' : 'general'
-  if (hasWork) return ratio < 0.8 ? 'work' : 'general'
   return 'general'
 }
 

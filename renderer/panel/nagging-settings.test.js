@@ -22,14 +22,21 @@ describe('잔소리 베타 설정', () => {
     expect(max?.value).toBe('12')
   })
 
-  it('캘린더, Agent, Slack 소식, Work 순서의 타이밍 잔소리를 안내한다', () => {
+  it('캘린더, Agent, GitHub PR, Slack 소식, Work 순서의 타이밍 잔소리를 안내한다', () => {
     const priorities = [...document.querySelectorAll('.nagging-priorities li')].map((item) => item.textContent)
-    expect(priorities).toHaveLength(4)
+    expect(priorities).toHaveLength(5)
     expect(priorities[0]).toContain('캘린더 일정 5분 전')
     expect(priorities[1]).toContain('Agent 작업 종료 후')
-    expect(priorities[2]).toContain('Slack 새 소식')
-    expect(priorities[3]).toContain('미완료 Work 작업')
+    expect(priorities[2]).toContain('GitHub PR')
+    expect(priorities[3]).toContain('Slack 새 소식')
+    expect(priorities[4]).toContain('미완료 Work 작업')
     expect(document.getElementById('nagging-calendar-settings')?.textContent).toContain('캘린더 권한')
+  })
+
+  it('GitHub PR 확인은 기본으로 켜져 있고 로컬 gh 로그인을 사용한다', () => {
+    const enabled = document.querySelector('input[name="githubPrNaggingEnabled"]')
+    expect(enabled?.checked).toBe(true)
+    expect(enabled?.closest('.nagging-github-pr')?.textContent).toContain('20분')
   })
 
   it('기본 공지 채널과 사용자 키워드 구독 입력을 제공한다', () => {
