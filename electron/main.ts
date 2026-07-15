@@ -31,7 +31,7 @@ import { activityTarget } from './activity-link.js'
 import { resolveWatchpupConfigPath } from '../src/core/config/path.js'
 import { ReminderGateway } from './reminders.js'
 import { WorkStatusService } from './work-status.js'
-import { focusVisiblePanel } from './panel-activation.js'
+import { focusVisiblePanel, setPanelSwitcherVisibility } from './panel-activation.js'
 
 let pet: BrowserWindow | null = null
 let panel: BrowserWindow | null = null
@@ -182,11 +182,13 @@ async function main(): Promise<void> {
   // 2) 창 + 트레이 생성
   pet = createPetWindow(config.petAlwaysOnTop)
   panel = createPanelWindow(state.getWindowBounds('panel'))
+  setPanelSwitcherVisibility(app, false)
   panel.on('close', (event) => {
     if (isQuitting) return
     event.preventDefault()
     activePanel()?.hide()
   })
+  panel.on('hide', () => setPanelSwitcherVisibility(app, false))
   // Cmd+Tab으로 Watchpup이 다시 활성화될 때 이미 열려 있는 상세 패널을 앞으로 가져온다.
   // 숨겨진 패널은 건드리지 않아 펫 더블클릭으로만 여는 동작을 유지한다.
   app.on('did-become-active', () => focusVisiblePanel(activePanel()))
@@ -242,6 +244,7 @@ async function main(): Promise<void> {
   }
 
   function activatePanel(win: BrowserWindow): void {
+    setPanelSwitcherVisibility(app, true)
     if (!win.isVisible()) win.show()
     // BrowserWindow.focus()만 호출하면 비활성 NSPanel인 펫에서 열었을 때
     // macOS 앱 자체는 비활성 상태로 남을 수 있다.

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { focusVisiblePanel, type ActivatablePanel } from './panel-activation.js'
+import {
+  focusVisiblePanel,
+  setPanelSwitcherVisibility,
+  type ActivatablePanel,
+  type ActivationPolicyApp,
+} from './panel-activation.js'
 
 function panel({ visible = true, minimized = false } = {}): ActivatablePanel {
   return {
@@ -12,6 +17,28 @@ function panel({ visible = true, minimized = false } = {}): ActivatablePanel {
 }
 
 describe('panel activation', () => {
+  it('macOS 패널이 열리면 Cmd+Tab 대상으로 전환한다', () => {
+    const app: ActivationPolicyApp = { setActivationPolicy: vi.fn() }
+
+    expect(setPanelSwitcherVisibility(app, true, 'darwin')).toBe(true)
+    expect(app.setActivationPolicy).toHaveBeenCalledWith('regular')
+  })
+
+  it('macOS 패널을 숨기면 펫 전용 보조 앱으로 돌아간다', () => {
+    const app: ActivationPolicyApp = { setActivationPolicy: vi.fn() }
+
+    setPanelSwitcherVisibility(app, false, 'darwin')
+
+    expect(app.setActivationPolicy).toHaveBeenCalledWith('accessory')
+  })
+
+  it('macOS가 아니면 활성화 정책을 바꾸지 않는다', () => {
+    const app: ActivationPolicyApp = { setActivationPolicy: vi.fn() }
+
+    expect(setPanelSwitcherVisibility(app, true, 'win32')).toBe(false)
+    expect(app.setActivationPolicy).not.toHaveBeenCalled()
+  })
+
   it('앱이 다시 활성화되면 열려 있는 패널을 앞으로 가져온다', () => {
     const target = panel()
 
