@@ -30,6 +30,18 @@ describe('agent session parser', () => {
     ])
   })
 
+  it('Claude custom-title을 최신 프롬프트나 세션 레지스트리 이름보다 우선한다', () => {
+    let state = newParsedSession('claude', 'claude-1')
+    state = applyClaudeRecord(state, { type: 'user', message: { content: '처음 요청' } })
+    state = applyClaudeRecord(state, { type: 'custom-title', customTitle: 'Phase 5 component work plan' })
+    state = applyClaudeRecord(state, { type: 'last-prompt', lastPrompt: '나중 요청' })
+    state = applyClaudeRecord(state, { type: 'user', message: { content: '가장 최근 요청' } })
+
+    expect(activityFromParsed(state, 'zigzag-ios-3-53')).toMatchObject({
+      title: 'Phase 5 component work plan',
+    })
+  })
+
   it('오랫동안 새 로그가 없는 실행 상태는 대기로 낮춘다', () => {
     const state = { ...newParsedSession('codex', 'thread-1'), state: 'running' as const, updatedAt: 1_000, title: '작업' }
     expect(activityFromParsed(state, undefined, 1_000 + 121_000).state).toBe('waiting')

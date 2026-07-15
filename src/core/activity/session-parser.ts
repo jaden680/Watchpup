@@ -8,6 +8,7 @@ export interface ParsedSessionState {
   source: Exclude<ActivitySource, 'slack'>
   sessionId: string
   title: string
+  customTitle?: string
   detail: string
   messages: ActivityMessage[]
   state: ActivityState
@@ -191,7 +192,12 @@ export function applyClaudeRecord(
 
   if (record.type === 'ai-title') {
     const title = compactText(record.aiTitle)
-    if (title) next.title = title
+    if (title) next.customTitle = title
+    return next
+  }
+  if (record.type === 'custom-title') {
+    const title = compactText(record.customTitle)
+    if (title) next.customTitle = title
     return next
   }
   if (record.type === 'last-prompt') {
@@ -202,7 +208,7 @@ export function applyClaudeRecord(
   if (record.type === 'user') {
     const message = object(record.message)
     const title = compactText(message?.content)
-    if (title) next.title = title
+    if (title && !next.customTitle) next.title = title
     next.messages = appendMessage(next.messages, 'user', message?.content, at)
     next.state = 'running'
     return next
@@ -233,7 +239,7 @@ export function activityFromParsed(
     id: `${parsed.source}:${parsed.sessionId}`,
     source: parsed.source,
     sessionId: parsed.sessionId,
-    title: compactText(titleOverride) || parsed.title || fallback,
+    title: parsed.customTitle || compactText(titleOverride) || parsed.title || fallback,
     detail: parsed.detail || undefined,
     state,
     updatedAt: parsed.updatedAt,

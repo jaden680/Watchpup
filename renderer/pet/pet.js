@@ -1,5 +1,5 @@
 import { activityStateLabel, formatElapsed } from './activity-format.js'
-import { bubbleSurfaceState, hudFoldContent } from './bubble-surface.js'
+import { bubbleOpenTarget, bubbleSurfaceState, canIncomingBubbleReplaceStream, hudFoldContent } from './bubble-surface.js'
 
 const pet = document.getElementById('pet')
 const petImg = document.getElementById('pet-img')
@@ -350,33 +350,19 @@ function createActivityRow() {
   row.append(dot, icon, title, state, context)
   const elapsed = document.createElement('span')
   elapsed.className = 'activity-elapsed'
-  const open = document.createElement('button')
-  open.type = 'button'
-  open.className = 'activity-open'
-  const openIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-  openIcon.setAttribute('viewBox', '0 0 16 16')
-  openIcon.setAttribute('aria-hidden', 'true')
-  const openIconPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-  openIconPath.setAttribute('d', 'M6.5 3H4.25A1.25 1.25 0 0 0 3 4.25v7.5A1.25 1.25 0 0 0 4.25 13h7.5A1.25 1.25 0 0 0 13 11.75V9.5M8.5 3H13v4.5M13 3 7.5 8.5')
-  openIcon.append(openIconPath)
-  open.append(openIcon)
-  open.addEventListener('click', (event) => {
-    event.stopPropagation()
-    window.watchpup.openActivity(row.dataset.activityId)
-  })
-  row.append(elapsed, open)
+  row.append(elapsed)
   row.addEventListener('click', () => window.watchpup.openActivityDetail(row.dataset.activityId))
   row.addEventListener('keydown', (event) => {
     if (event.target !== row || (event.key !== 'Enter' && event.key !== ' ')) return
     event.preventDefault()
     window.watchpup.openActivityDetail(row.dataset.activityId)
   })
-  row.activityElements = { icon, title, state, context, elapsed, open }
+  row.activityElements = { icon, title, state, context, elapsed }
   return row
 }
 
 function updateActivityRow(row, activity) {
-  const { icon, title, state, context, elapsed, open } = row.activityElements
+  const { icon, title, state, context, elapsed } = row.activityElements
   row.dataset.activityId = activity.id
   row.className = `activity-row state-${activity.state || 'waiting'}`
   row.title = `Watchpup에서 보기 · ${activity.title || ''}`
@@ -387,11 +373,6 @@ function updateActivityRow(row, activity) {
   context.hidden = !Number.isFinite(activity.contextPercent)
   context.textContent = context.hidden ? '' : `${Math.round(activity.contextPercent)}%`
   elapsed.textContent = formatElapsed(activity.updatedAt)
-  open.hidden = false
-  open.disabled = activity.canOpen === false
-  const directTarget = activity.source === 'slack' ? 'Slack 스레드' : `${ACTIVITY_NAMES[activity.source]} 세션`
-  open.title = open.disabled ? '직접 열 수 없는 항목입니다' : `${directTarget}으로 이동`
-  open.setAttribute('aria-label', open.title)
 }
 
 function renderActivities(rows) {
@@ -422,6 +403,21 @@ setInterval(() => renderActivities(activities), 30_000)
 let bubbleTimer = null
 let chatStreaming = false
 let chatBuf = ''
+let chatStartTimer = null
+const CHAT_START_TIMEOUT_MS = 60_000
+
+function clearChatStartTimer() {
+  if (!chatStartTimer) return
+  clearTimeout(chatStartTimer)
+  chatStartTimer = null
+}
+
+function finishChatStreaming() {
+  clearChatStartTimer()
+  chatStreaming = false
+  bubble.classList.remove('streaming')
+  hudMessage.classList.remove('streaming')
+}
 
 function renderBubbleSurface() {
   const state = bubbleSurfaceState({ active: bubbleActive, showActivityHud, activityCount: activityList.childElementCount })
@@ -473,17 +469,34 @@ function showBubble(text, hideAfterMs) {
 }
 
 let bubbleMentionId = null
+let bubbleWorkItemId = null
+let bubbleActivityId = null
+let bubbleCalendarEvent = false
+let bubbleCalendarPrivacy = false
+let bubbleSlackNewsUrl = null
 window.watchpup.onBubble((payload) => {
-  // payload: string(구버전/idle) 또는 { text, mentionId }
+  // payload: string(구버전/idle) 또는 연결 대상이 포함된 말풍선 객체.
   const text = typeof payload === 'string' ? payload : payload && payload.text
   const id = typeof payload === 'object' && payload ? payload.mentionId : null
+  const workItemId = typeof payload === 'object' && payload ? payload.workItemId : null
+  const activityId = typeof payload === 'object' && payload ? payload.activityId : null
+  const calendarEvent = typeof payload === 'object' && payload ? payload.calendarEvent === true : false
+  const calendarPrivacy = typeof payload === 'object' && payload ? payload.calendarPrivacy === true : false
+  const slackNewsUrl = typeof payload === 'object' && payload ? payload.slackNewsUrl : null
   if (typeof text !== 'string' || !text) return
-  if (chatStreaming) return
+  if (!canIncomingBubbleReplaceStream(chatStreaming, chatBuf)) return
+  if (chatStreaming) finishChatStreaming()
   bubbleMentionId = id || null
+  bubbleWorkItemId = workItemId || null
+  bubbleActivityId = activityId || null
+  bubbleCalendarEvent = calendarEvent
+  bubbleCalendarPrivacy = calendarPrivacy
+  bubbleSlackNewsUrl = typeof slackNewsUrl === 'string' ? slackNewsUrl : null
   bubble.classList.remove('streaming')
   hudMessage.classList.remove('streaming')
-  bubble.classList.toggle('clickable', !!bubbleMentionId)
-  hudMessage.classList.toggle('clickable', !!bubbleMentionId)
+  const clickable = !!bubbleMentionId || !!bubbleWorkItemId || !!bubbleActivityId || bubbleCalendarEvent || bubbleCalendarPrivacy || !!bubbleSlackNewsUrl
+  bubble.classList.toggle('clickable', clickable)
+  hudMessage.classList.toggle('clickable', clickable)
   showBubble(text, 30000)
 })
 
@@ -492,26 +505,30 @@ window.watchpup.onChatBubble((ev) => {
   if (!ev || typeof ev !== 'object') return
   const type = ev.type
   if (type === 'start') {
+    clearChatStartTimer()
     chatStreaming = true
     chatBuf = ''
     bubble.classList.add('streaming')
     hudMessage.classList.add('streaming')
-    showBubble('…', null)
+    showBubble('답변을 준비하고 있어요…', null)
+    chatStartTimer = setTimeout(() => {
+      chatStartTimer = null
+      if (!chatStreaming || chatBuf) return
+      finishChatStreaming()
+      hideBubbleSurface()
+    }, CHAT_START_TIMEOUT_MS)
     return
   }
   if (type === 'progress' || type === 'assistant_text') {
+    clearChatStartTimer()
     chatStreaming = true
     chatBuf += ev.text || ''
-    showBubble(chatBuf || '…', null)
+    showBubble(chatBuf || '답변을 준비하고 있어요…', null)
   } else if (type === 'result') {
-    chatStreaming = false
-    bubble.classList.remove('streaming')
-    hudMessage.classList.remove('streaming')
+    finishChatStreaming()
     showBubble(ev.text || chatBuf || '(빈 응답)', 20000)
   } else if (type === 'error') {
-    chatStreaming = false
-    bubble.classList.remove('streaming')
-    hudMessage.classList.remove('streaming')
+    finishChatStreaming()
     showBubble('오류: ' + (ev.message || '알 수 없음'), 9000)
   }
 })
@@ -525,7 +542,13 @@ activityHud.addEventListener('click', (event) => {
 })
 // 말풍선 클릭 → 스레드가 연결돼 있으면 그 스레드를 열고, 아니면 패널을 연다.
 function openBubbleTarget() {
-  if (bubbleMentionId) window.watchpup.openMention(bubbleMentionId)
+  const target = bubbleOpenTarget(bubbleMentionId, bubbleWorkItemId, bubbleActivityId, bubbleCalendarEvent, bubbleCalendarPrivacy, bubbleSlackNewsUrl)
+  if (target.kind === 'mention') window.watchpup.openMention(target.id)
+  else if (target.kind === 'work') window.watchpup.openWorkItem(target.id)
+  else if (target.kind === 'activity') window.watchpup.openActivityDetail(target.id)
+  else if (target.kind === 'calendar-privacy') window.watchpup.openCalendarPrivacy()
+  else if (target.kind === 'calendar') window.watchpup.openCalendar()
+  else if (target.kind === 'external') window.watchpup.openExternal(target.url)
   else window.watchpup.showPanel()
   hideBubbleSurface()
 }

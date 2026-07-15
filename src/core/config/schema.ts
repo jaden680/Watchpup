@@ -82,7 +82,23 @@ export const watchpupConfigSchema = z.object({
   // 펫·말풍선·HUD가 공유하는 가로 기준선. 화면 오른쪽 배치를 고려해 오른쪽이 기본.
   hudAlignment: z.enum(['left', 'right']).default('right'),
   // 세션 HUD를 화면에 표시할지. 수집은 이 값과 무관하게 계속된다.
-  showActivityHud: z.boolean().default(true),
+  showActivityHud: z.boolean().default(false),
+  // 베타: 선택한 Work 목록의 미완료 작업을 무작위 간격으로 말풍선에서 상기한다.
+  naggingEnabled: z.boolean().default(false),
+  naggingMinMinutes: z.number().int().min(1).max(120).default(5),
+  naggingMaxMinutes: z.number().int().min(1).max(120).default(12),
+  // 구독한 Slack 채널·키워드의 새 루트 메시지를 무작위 잔소리에 섞는다.
+  slackNewsEnabled: z.boolean().default(false),
+  slackNewsChannels: z.array(z.string()).default(['all_전사공유', 'all_전사공지', 'all_random']),
+  slackNewsKeywords: z.array(z.string()).default([]),
+  // Work 탭에서 사용할 Apple Reminders 목록. Watchpup이 자체적으로 선택을 저장한다.
+  reminderListId: z.string().default(''),
+  reminderListName: z.string().default(''),
+  reminderAccountName: z.string().default(''),
+  reminderListSelectionExplicit: z.boolean().default(false),
+  showCompletedReminders: z.boolean().default(false),
+  reminderTaskSortOrder: z.enum(['manual', 'dueDateThenTitle', 'createdNewest', 'updatedNewest', 'titleAscending']).default('dueDateThenTitle'),
+  reminderTaskManualOrder: z.array(z.string()).default([]),
   // 커스텀 펫 이미지 폴더(설정 시 이모지 대신 이미지 사용, 공모양 배경 제거).
   // 폴더에 idle/thinking/ready/chatting.(gif|png|apng|webp|jpg) 파일을 두면 상태별로 사용.
   petImageDir: z.string().default(''),

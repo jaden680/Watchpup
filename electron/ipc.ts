@@ -10,6 +10,10 @@ export const CMD = {
   chatSend: 'chat.send',
   settingsGet: 'settings.get',
   settingsSet: 'settings.set',
+  modelCatalogGet: 'model.catalog.get',
+  modelCatalogRefresh: 'model.catalog.refresh',
+  naggingLogList: 'nagging.log.list',
+  naggingLogClear: 'nagging.log.clear',
   tokensGet: 'tokens.get',
   tokensSet: 'tokens.set',
   playbooksList: 'playbooks.list',
@@ -17,6 +21,19 @@ export const CMD = {
   playbookDelete: 'playbook.delete',
   actionRun: 'action.run',
   reactionSet: 'reaction.set',
+  workLists: 'work.lists',
+  workItems: 'work.items',
+  workListSelect: 'work.list.select',
+  workReminderCreate: 'work.reminder.create',
+  workReminderSubtaskAdd: 'work.reminder.subtask.add',
+  workReminderTitleUpdate: 'work.reminder.title.update',
+  workReminderNoteUpdate: 'work.reminder.note.update',
+  workReminderComplete: 'work.reminder.complete',
+  workReminderLinkAdd: 'work.reminder.link.add',
+  workItemTouch: 'work.item.touch',
+  workLinkStatus: 'work.link.status',
+  workLinkAction: 'work.link.action',
+  workRemindersOpen: 'work.reminders.open',
 } as const
 
 export const EVT = {
@@ -38,6 +55,7 @@ export const EVT = {
   hudVisibility: 'hud.visibility',
   actionStream: 'action.stream',
   actionDone: 'action.done',
+  naggingLogChanged: 'nagging.log.changed',
 } as const
 
 export interface ChatSendArgs {
@@ -92,6 +110,12 @@ export interface SettingsPatch {
   hudSizePercent?: number
   hudAlignment?: 'left' | 'right'
   showActivityHud?: boolean
+  naggingEnabled?: boolean
+  naggingMinMinutes?: number
+  naggingMaxMinutes?: number
+  slackNewsEnabled?: boolean
+  slackNewsChannels?: string[]
+  slackNewsKeywords?: string[]
   petImageDir?: string
   petCodexDir?: string
   persona?: string
@@ -102,6 +126,9 @@ export interface SettingsPatch {
     folder?: string
   }
   model?: string
+  reminderTaskSortOrder?: 'manual' | 'dueDateThenTitle' | 'createdNewest' | 'updatedNewest' | 'titleAscending'
+  reminderTaskManualOrder?: string[]
+  showCompletedReminders?: boolean
 }
 
 /** 저장할 토큰(빈 문자열/undefined는 무시 = 기존 유지). 값은 Keychain에만 저장. */

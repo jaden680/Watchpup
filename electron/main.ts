@@ -7,12 +7,26 @@ import { ConfigStore } from '../src/core/config/store.js'
 import { SessionStore } from '../src/core/session/store.js'
 import { KeyedMutex } from '../src/core/session/locks.js'
 import { Semaphore } from '../src/core/session/semaphore.js'
-import { StateStore } from '../src/core/state/store.js'
+import { StateStore, type NaggingLogEntry, type NaggingLogKind } from '../src/core/state/store.js'
 import { AuditStore } from '../src/core/observability/audit.js'
 import { MentionStore } from '../src/core/state/mentions.js'
 import { LessonStore } from '../src/core/state/lessons.js'
 import { bubbleReady as bubbleReadyText, bubbleFollowup as bubbleFollowupText, bubbleAnalyzing as bubbleAnalyzingText, type BubbleStyle } from '../src/core/presentation/bubble.js'
 import { pickIdleLine } from '../src/core/presentation/idle.js'
+import {
+  agentNaggingLine,
+  agentNaggingPending,
+  calendarEventKey,
+  calendarNaggingLine,
+  naggingLine,
+  nextNaggingDelayMs,
+  chooseNaggingSource,
+  pickCalendarNaggingEvent,
+  pickNaggingWorkItem,
+  pickSlackNewsNagging,
+  slackNewsNaggingLine,
+  type SlackNewsNaggingItem,
+} from '../src/core/presentation/nagging.js'
 import { WatchpupGateway } from '../src/core/slack/gateway.js'
 import { generateQuips } from '../src/core/watchpup/quips.js'
 import { parseSkillMd } from '../src/core/watchpup/skill-import.js'
@@ -29,6 +43,11 @@ import { LocalAgentPoller, type ActivityHistoryRange } from '../src/core/activit
 import { mergeActivities, slackActivities } from '../src/core/activity/merge.js'
 import { activityTarget } from './activity-link.js'
 import { resolveWatchpupConfigPath } from '../src/core/config/path.js'
+import { ReminderGateway } from './reminders.js'
+import { WorkStatusService } from './work-status.js'
+import { focusVisiblePanel, setPanelSwitcherVisibility } from './panel-activation.js'
+import { ClaudeModelCatalogService } from '../src/core/agent/model-catalog.js'
+import { ensureOpenAtLogin } from './login-item.js'
 
 let pet: BrowserWindow | null = null
 let panel: BrowserWindow | null = null
@@ -75,6 +94,9 @@ async function main(): Promise<void> {
   const state = new StateStore(join(config.dataDir, 'watchpup-state.json'))
   const audit = new AuditStore(join(config.dataDir, 'audit.jsonl'))
   const lessons = new LessonStore(join(config.dataDir, 'lessons.json'))
+  const reminders = new ReminderGateway()
+  const workStatus = new WorkStatusService(configStore, keychain)
+  const modelCatalog = new ClaudeModelCatalogService(join(config.dataDir, 'claude-models.json'))
   const deps = {
     config,
     sessions,
@@ -90,6 +112,72 @@ async function main(): Promise<void> {
   // 렌더러가 창 로드 직후 요청하는 초기 설정 핸들러는 창을 만들기 전에 등록한다.
   // 늦게 등록하면 첫 요청이 실패한 뒤 기본 UI 값(100%)이 그대로 남을 수 있다.
   ipcMain.handle(CMD.settingsGet, () => configStore.get())
+  ipcMain.handle(CMD.modelCatalogGet, () => modelCatalog.get())
+  ipcMain.handle(CMD.modelCatalogRefresh, () => modelCatalog.refresh())
+  ipcMain.handle(CMD.naggingLogList, () => state.naggingLog())
+  ipcMain.handle(CMD.naggingLogClear, () => {
+    state.clearNaggingLog()
+    broadcast(EVT.naggingLogChanged, null)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workLists, async () => {
+    const lists = await reminders.lists()
+    const current = configStore.get()
+    const selected = current.reminderListSelectionExplicit
+      ? lists.find((list) => list.id === current.reminderListId)
+      : undefined
+    return { lists, selectedId: selected?.id ?? '' }
+  })
+  ipcMain.handle(CMD.workItems, async (_e, args: { listId?: string; includeCompleted?: boolean } = {}) => {
+    const current = configStore.get()
+    const listId = args.listId || current.reminderListId
+    if (!listId) return []
+    return reminders.tasks(listId, args.includeCompleted ?? current.showCompletedReminders)
+  })
+  ipcMain.handle(CMD.workListSelect, async (_e, listId: string) => {
+    const selected = (await reminders.lists()).find((list) => list.id === listId)
+    if (!selected) throw new Error('선택한 Reminder 목록을 찾지 못했습니다.')
+    deps.config = configStore.update({
+      reminderListId: selected.id,
+      reminderListName: selected.name,
+      reminderAccountName: selected.account,
+      reminderListSelectionExplicit: true,
+    })
+    return selected
+  })
+  ipcMain.handle(CMD.workReminderCreate, async (_e, args: { listId: string; title: string; notes?: string }) => {
+    const list = (await reminders.lists()).find((candidate) => candidate.id === args.listId)
+    if (!list) throw new Error('선택한 Reminder 목록을 찾지 못했습니다.')
+    const id = await reminders.create(list.id, args.title, args.notes)
+    return { id }
+  })
+  ipcMain.handle(CMD.workReminderSubtaskAdd, async (_e, args: { parentReminderId: string; title: string }) => {
+    const id = await reminders.addSubtask(args.parentReminderId, args.title)
+    return { id }
+  })
+  ipcMain.handle(CMD.workReminderTitleUpdate, async (_e, args: { reminderId: string; title: string }) => {
+    await reminders.updateTitle(args.reminderId, args.title)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workReminderNoteUpdate, async (_e, args: { reminderId: string; note: string }) => {
+    await reminders.updateUserNote(args.reminderId, args.note)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workReminderComplete, async (_e, args: { reminderId: string; completed: boolean }) => {
+    await reminders.setCompleted(args.reminderId, args.completed)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workReminderLinkAdd, async (_e, args: { reminderId: string; title: string; url: string }) => {
+    await reminders.appendLink(args.reminderId, args.title, args.url)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workItemTouch, (_e, reminderId: string) => {
+    if (typeof reminderId === 'string' && reminderId) state.touchWorkItem(reminderId)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workLinkStatus, (_e, url: string) => workStatus.status(url))
+  ipcMain.handle(CMD.workLinkAction, (_e, args: { url: string; actionId: string }) => workStatus.runAction(args.url, args.actionId))
+  ipcMain.handle(CMD.workRemindersOpen, () => shell.openPath('/System/Applications/Reminders.app'))
   ipcMain.handle('pet.images.get', () => petImagesFromDir(configStore.get().petImageDir))
   ipcMain.handle('pet.codex.get', () => resolveCodexPet(configStore.get().petCodexDir))
 
@@ -123,11 +211,17 @@ async function main(): Promise<void> {
   // 2) 창 + 트레이 생성
   pet = createPetWindow(config.petAlwaysOnTop)
   panel = createPanelWindow(state.getWindowBounds('panel'))
+  setPanelSwitcherVisibility(app, false)
   panel.on('close', (event) => {
     if (isQuitting) return
     event.preventDefault()
     activePanel()?.hide()
   })
+  panel.on('hide', () => setPanelSwitcherVisibility(app, false))
+  panel.on('focus', () => acknowledgeAgentNagging())
+  // Cmd+Tab으로 Watchpup이 다시 활성화될 때 이미 열려 있는 상세 패널을 앞으로 가져온다.
+  // 숨겨진 패널은 건드리지 않아 펫 더블클릭으로만 여는 동작을 유지한다.
+  app.on('did-become-active', () => focusVisiblePanel(activePanel()))
 
 
   rememberBounds(panel, 'panel')
@@ -179,12 +273,19 @@ async function main(): Promise<void> {
     if (process.platform === 'darwin') app.dock?.setBadge('')
   }
 
+  function activatePanel(win: BrowserWindow): void {
+    setPanelSwitcherVisibility(app, true)
+    if (!win.isVisible()) win.show()
+    // BrowserWindow.focus()만 호출하면 비활성 NSPanel인 펫에서 열었을 때
+    // macOS 앱 자체는 비활성 상태로 남을 수 있다.
+    if (process.platform === 'darwin') app.focus({ steal: true })
+    win.focus()
+  }
+
   function showPanelHome(): void {
     const win = activePanel()
     if (!win) return
-    if (!win.isVisible()) win.show()
-    win.focus()
-    send(win, 'panel.shown', {}) // 열 때 항상 멘션 목록부터(직전 설정 탭 잔상 방지)
+    activatePanel(win)
     clearPanelBadge()
   }
 
@@ -198,8 +299,8 @@ async function main(): Promise<void> {
   function openActivityPanel(id: string): void {
     const win = activePanel()
     if (!win) return
-    if (!win.isVisible()) win.show()
-    win.focus()
+    acknowledgeAgentNagging()
+    activatePanel(win)
     clearPanelBadge()
     send(win, 'activity.focus', id)
   }
@@ -212,13 +313,18 @@ async function main(): Promise<void> {
     const win = activePanel()
     if (!win || typeof id !== 'string' || !id) return
     if (!win.isVisible()) {
-      win.show()
       clearPanelBadge()
     }
-    win.focus()
+    activatePanel(win)
     send(win, 'mention.focus', id)
   }
   ipcMain.on('pet.openMention', (_e, id: string) => openMentionPanel(id))
+  ipcMain.on('pet.openWorkItem', (_e, id: string) => {
+    const win = activePanel()
+    if (!win || typeof id !== 'string' || !id) return
+    activatePanel(win)
+    send(win, 'work.focus', id)
+  })
   ipcMain.handle(CMD.activityList, (_e, requestedRange?: ActivityHistoryRange) => {
     const range: ActivityHistoryRange = ['recent', 'today', '7d', 'all'].includes(requestedRange || '')
       ? requestedRange as ActivityHistoryRange
@@ -235,6 +341,7 @@ async function main(): Promise<void> {
   ipcMain.on('activity.open', (_e, id: string) => {
     const target = activityTarget(id)
     if (!target) return
+    acknowledgeAgentNagging()
     if (target.kind === 'external') {
       void shell.openExternal(target.url)
     } else {
@@ -245,6 +352,12 @@ async function main(): Promise<void> {
   })
   ipcMain.on('pet.setMouseIgnore', (_e, ignore: boolean) => {
     if (pet) pet.setIgnoreMouseEvents(!!ignore, { forward: true })
+  })
+  ipcMain.on('pet.openCalendar', () => {
+    void shell.openPath('/System/Applications/Calendar.app')
+  })
+  ipcMain.on('calendar.privacy.open', () => {
+    void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars')
   })
   // permalink 등 외부 링크는 기본 브라우저로 (창 네비게이션 방지)
   ipcMain.on('open.external', (_e, url: string) => {
@@ -465,9 +578,36 @@ async function main(): Promise<void> {
     broadcast('mentions.refresh', null)
     broadcastActivities()
   })
+  gateway.on('slack:news', (item: SlackNewsNaggingItem) => {
+    state.enqueueNaggingSlackNews(item)
+  })
 
+  const agentBatchIds = new Set<string>()
   agentPoller = new LocalAgentPoller()
   agentPoller.on('snapshot', (activities: ActivitySession[]) => {
+    const running = activities.filter((activity) => activity.state === 'running')
+    if (running.length) {
+      for (const activity of running) agentBatchIds.add(activity.id)
+      const pending = state.get().nagging?.agent
+      if (pending && running.some((activity) => activity.id === pending.activityId && activity.messages?.at(-1)?.role === 'user')) {
+        acknowledgeAgentNagging()
+      }
+    } else if (agentBatchIds.size) {
+      const current = configStore.get()
+      const dueAt = Date.now() + Math.max(1, current.naggingMinMinutes) * 60_000
+      const pending = agentNaggingPending(agentBatchIds, activities, dueAt)
+      const previous = state.get().nagging?.agent
+      if (pending && current.naggingEnabled && !activePanel()?.isFocused()) {
+        state.setNaggingAgent(previous ? {
+          ...pending,
+          count: previous.count + pending.count,
+          dueAt: Math.min(previous.dueAt, pending.dueAt),
+          repeatCount: previous.repeatCount,
+          waiting: previous.waiting || pending.waiting,
+        } : pending)
+      }
+      agentBatchIds.clear()
+    }
     localActivities = activities
     broadcastActivities()
   })
@@ -495,12 +635,128 @@ async function main(): Promise<void> {
   refillQuips() // 시작 시 한 배치 미리 생성
   setInterval(() => {
     if (!pet || pet.isDestroyed()) return
+    if (configStore.get().naggingEnabled) return
     if (activePanel()?.isVisible()) return
     if (Date.now() - lastActivity < IDLE_MS) return
     refillQuips() // 캐시 보충(비동기)
     send(pet, EVT.bubble, idleLine())
     lastActivity = Date.now() // 다음 혼잣말까지 간격 확보
   }, 4 * 60 * 1000)
+
+  // 베타 `잔소리`: 캘린더 임박 일정 → 확인하지 않은 Agent 완료 → Slack 소식/Work 순서로 상기한다.
+  // 다음 예정 시각과 이미 알린 대상을 저장해 앱 재실행 뒤에도 중복 알림을 피한다.
+  let naggingTimer: NodeJS.Timeout | null = null
+  let priorityNaggingBusy = false
+  let calendarRetryAt = 0
+  let calendarPermissionNagged = false
+
+  function showNagging(kind: NaggingLogKind, text: string, payload: Record<string, unknown>, context?: string): void {
+    const entry: NaggingLogEntry = { at: Date.now(), kind, text, ...(context ? { context } : {}) }
+    state.appendNaggingLog(entry)
+    send(pet, EVT.bubble, { text, ...payload })
+    broadcast(EVT.naggingLogChanged, entry)
+  }
+
+  function acknowledgeAgentNagging(): void {
+    if (state.get().nagging?.agent) state.setNaggingAgent(undefined)
+  }
+
+  function scheduleNagging(reset = false): void {
+    if (naggingTimer) clearTimeout(naggingTimer)
+    naggingTimer = null
+    const current = configStore.get()
+    if (!current.naggingEnabled) {
+      state.setNagging({ nextAt: undefined })
+      acknowledgeAgentNagging()
+      return
+    }
+    const now = Date.now()
+    const savedNextAt = reset ? undefined : state.get().nagging?.nextAt
+    const nextAt = savedNextAt && savedNextAt > now
+      ? savedNextAt
+      : now + nextNaggingDelayMs(current.naggingMinMinutes, current.naggingMaxMinutes)
+    state.setNagging({ nextAt })
+    naggingTimer = setTimeout(() => { void runNagging() }, Math.max(1000, nextAt - now))
+  }
+
+  async function runPriorityNagging(): Promise<boolean> {
+    if (priorityNaggingBusy || !configStore.get().naggingEnabled || !pet || pet.isDestroyed()) return false
+    priorityNaggingBusy = true
+    try {
+      const now = Date.now()
+      if (now >= calendarRetryAt) {
+        try {
+          const events = await reminders.upcomingEvents(now - 60_000, now + 6 * 60_000)
+          const event = pickCalendarNaggingEvent(events, state.naggingCalendarNotified(), now)
+          if (event) {
+            state.markNaggingCalendar(calendarEventKey(event), now)
+            showNagging('calendar', calendarNaggingLine(event, now), { calendarEvent: true }, event.title)
+            lastActivity = now
+            return true
+          }
+        } catch (error) {
+          calendarRetryAt = now + 15 * 60_000
+          console.warn('잔소리 캘린더 조회 실패', error)
+          if (!calendarPermissionNagged && String((error as Error)?.message || error).includes('캘린더 전체 접근 권한')) {
+            calendarPermissionNagged = true
+            showNagging('calendar', '캘린더 일정도 알려주려면 권한이 필요해요. 눌러서 허용해줘!', { calendarPrivacy: true }, '캘린더 권한')
+            return true
+          }
+        }
+      }
+
+      const pending = state.get().nagging?.agent
+      if (pending && pending.dueAt <= now) {
+        showNagging('agent', agentNaggingLine(pending), { activityId: pending.activityId }, pending.title)
+        state.setNaggingAgent({
+          ...pending,
+          dueAt: now + nextNaggingDelayMs(configStore.get().naggingMinMinutes, configStore.get().naggingMaxMinutes),
+          repeatCount: pending.repeatCount + 1,
+        })
+        lastActivity = now
+        return true
+      }
+      return false
+    } finally {
+      priorityNaggingBusy = false
+    }
+  }
+
+  async function runNagging(): Promise<void> {
+    try {
+      const current = configStore.get()
+      if (!current.naggingEnabled || !pet || pet.isDestroyed()) return
+      if (await runPriorityNagging()) return
+      const items = current.reminderListId
+        ? await reminders.tasks(current.reminderListId, false)
+        : []
+      if (!configStore.get().naggingEnabled) return
+      const item = pickNaggingWorkItem(items, state.workTouchedAt(), state.naggingRecentTaskIds())
+      const news = current.slackNewsEnabled ? pickSlackNewsNagging(state.naggingSlackNews()) : null
+      const source = chooseNaggingSource(!!item, !!news)
+      if (source === 'slack' && news) {
+        state.dismissNaggingSlackNews(news.id)
+        showNagging('slack', slackNewsNaggingLine(news), { slackNewsUrl: news.permalink }, `#${news.channelName}`)
+        lastActivity = Date.now()
+        return
+      }
+      if (source === 'work' && item) {
+        state.rememberNaggingTask(item.id)
+        showNagging('work', naggingLine(item), { workItemId: item.id }, item.title)
+      } else {
+        showNagging('general', naggingLine(null), {})
+      }
+      lastActivity = Date.now()
+    } catch (error) {
+      console.warn('잔소리 작업 조회 실패', error)
+    } finally {
+      scheduleNagging(true)
+    }
+  }
+
+  scheduleNagging()
+  setInterval(() => { void runPriorityNagging() }, 30_000)
+  setTimeout(() => { void runPriorityNagging() }, 2_000)
 
   // 4) 감지원 부착: 봇(소켓) / 내 계정 검색 폴링 — config 플래그 + 토큰 존재 시
   const botToken = await keychain.get(SecretKeys.slackBotToken)
@@ -574,6 +830,9 @@ async function main(): Promise<void> {
   })
   ipcMain.handle(CMD.settingsSet, (_e, patch: SettingsPatch) => {
     const current = configStore.get()
+    const slackNewsChanged = ('slackNewsEnabled' in patch && patch.slackNewsEnabled !== current.slackNewsEnabled)
+      || ('slackNewsChannels' in patch && JSON.stringify(patch.slackNewsChannels) !== JSON.stringify(current.slackNewsChannels))
+      || ('slackNewsKeywords' in patch && JSON.stringify(patch.slackNewsKeywords) !== JSON.stringify(current.slackNewsKeywords))
     const merged = {
       ...patch,
       obsidian: { ...current.obsidian, ...(patch.obsidian ?? {}) },
@@ -591,6 +850,14 @@ async function main(): Promise<void> {
     send(pet, EVT.petImages, petImagesFromDir(c.petImageDir))
     send(pet, EVT.petCodex, resolveCodexPet(c.petCodexDir))
     if (pet && !pet.isDestroyed()) pet.setAlwaysOnTop(c.petAlwaysOnTop) // 즉시 반영
+    if ('naggingEnabled' in patch || 'naggingMinMinutes' in patch || 'naggingMaxMinutes' in patch || 'slackNewsEnabled' in patch) {
+      scheduleNagging(true)
+      if (c.naggingEnabled) void runPriorityNagging()
+    }
+    if ('naggingEnabled' in patch || 'slackNewsEnabled' in patch || 'slackNewsChannels' in patch || 'slackNewsKeywords' in patch) {
+      if (slackNewsChanged) state.clearNaggingSlackNews()
+      void gateway?.refreshSlackNews()
+    }
   })
   // 토큰: 존재 여부만 조회 / 값 저장은 Keychain에만 (설정 변경은 재시작 후 반영)
   ipcMain.handle(CMD.tokensGet, async (): Promise<TokensStatus> => ({
@@ -636,19 +903,26 @@ async function main(): Promise<void> {
     return readGlobalMcpCandidates().map((c) => ({ ...c, already: existing.has(c.id) }))
   })
   // 간편 연동 (노션·지라) — 토큰 Keychain 저장 + MCP 서버 자동 구성
-  ipcMain.handle('integration.status', () => integrationStatus(configStore))
+  ipcMain.handle('integration.status', async () => {
+    const status = await integrationStatus(configStore)
+    if (!status.jira.connected) return status
+    const auth = await workStatus.jiraConnectionStatus()
+    return { ...status, jira: { ...status.jira, ...auth } }
+  })
   ipcMain.handle('integration.connectNotion', async (_e, token: string) => {
     deps.config = await connectNotion(configStore, keychain, token || '')
   })
   ipcMain.handle('integration.connectJira', async (_e, a: { site: string; email: string; token: string }) => {
     deps.config = await connectJira(configStore, keychain, { site: a.site || '', email: a.email || '', token: a.token || '' })
+    workStatus.resetJiraAuth()
   })
   ipcMain.handle('integration.disconnect', (_e, id: 'notion' | 'jira') => {
     deps.config = disconnectIntegration(configStore, id)
+    if (id === 'jira') workStatus.resetJiraAuth()
   })
 
-  // 6) 감지원이 하나라도 붙었고 mySlackUserId가 있으면 기동
-  if (gateway.hasSource() && config.mySlackUserId) {
+  // 6) 일반 감지는 mySlackUserId, Slack 소식 구독은 User Token만 있어도 기동
+  if (gateway.hasSource() && (config.mySlackUserId || !!userToken)) {
     try {
       await gateway.start()
       // 예전 멘션의 채널 라벨(raw ID → DM/#채널) 일괄 갱신 후 열린 목록 새로고침
@@ -661,12 +935,15 @@ async function main(): Promise<void> {
   } else {
     const missing: string[] = []
     if (!gateway.hasSource()) missing.push('슬랙 연결(봇 토큰 또는 User Token)')
-    if (!config.mySlackUserId) missing.push('mySlackUserId')
+    if (!config.mySlackUserId && !userToken) missing.push('mySlackUserId')
     console.warn(`미설정 — Slack 감시 대기 중: ${missing.join(', ')}. 설정 탭에서 저장 후 앱 재시작.`)
   }
 }
 
-app.whenReady().then(main)
+app.whenReady().then(() => {
+  ensureOpenAtLogin(app)
+  return main()
+})
 app.on('window-all-closed', () => {
   /* 트레이 상주: macOS에서 유지 */
 })
