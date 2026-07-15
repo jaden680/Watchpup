@@ -4,6 +4,7 @@ import {
   agentNaggingPending,
   calendarEventKey,
   calendarNaggingLine,
+  chooseNaggingSource,
   naggingLine,
   nextNaggingDelayMs,
   pickCalendarNaggingEvent,
@@ -25,11 +26,25 @@ describe('nagging presentation', () => {
     expect(nextNaggingDelayMs(12, 5, () => 0.9)).toBe(12 * 60_000)
   })
 
-  it('최근 열어본 작업을 우선하고 직전 작업은 가능한 경우 피한다', () => {
+  it('최근 세 번 표시한 작업을 피하면서 전체 미완료 작업을 후보로 둔다', () => {
     const now = Date.now()
-    const items = [item('a'), item('b'), item('c')]
-    const picked = pickNaggingWorkItem(items, { a: now - 1000, b: now - 2000 }, 'a', now, () => 0)
+    const items = [item('a'), item('b'), item('c'), item('d'), item('e')]
+    const picked = pickNaggingWorkItem(items, { a: now - 1000, b: now - 2000 }, ['a', 'b', 'c'], now, () => 0)
+    expect(picked?.id).toBe('d')
+  })
+
+  it('최근 열어본 작업은 제외되지 않은 후보 안에서만 가중치를 준다', () => {
+    const now = Date.now()
+    const items = [item('a'), item('b'), item('c'), item('d')]
+    const picked = pickNaggingWorkItem(items, { a: now - 1000, d: now - 2000 }, ['a'], now, () => 0)
     expect(picked?.id).toBe('b')
+  })
+
+  it('Work와 Slack이 있어도 일반 잔소리를 일정 비율로 섞는다', () => {
+    expect(chooseNaggingSource(true, true, () => 0.2)).toBe('slack')
+    expect(chooseNaggingSource(true, true, () => 0.5)).toBe('work')
+    expect(chooseNaggingSource(true, true, () => 0.9)).toBe('general')
+    expect(chooseNaggingSource(true, false, () => 0.9)).toBe('general')
   })
 
   it('작업이 없으면 일반 잔소리를 만든다', () => {

@@ -37,6 +37,7 @@ export interface WatchpupState {
   nagging?: {
     nextAt?: number
     lastTaskId?: string
+    recentTaskIds?: string[]
     agent?: AgentNaggingPending
     calendarNotified?: Record<string, number>
     slackNewsCursor?: Record<string, string>
@@ -101,6 +102,18 @@ export class StateStore {
   workTouchedAt(): Record<string, number> { return { ...(this.state.workTouchedAt ?? {}) } }
   setNagging(next: { nextAt?: number; lastTaskId?: string }): void {
     this.state.nagging = { ...(this.state.nagging ?? {}), ...next }
+    this.persist()
+  }
+  naggingRecentTaskIds(): string[] {
+    const nagging = this.state.nagging
+    if (nagging?.recentTaskIds?.length) return [...nagging.recentTaskIds]
+    return nagging?.lastTaskId ? [nagging.lastTaskId] : []
+  }
+  rememberNaggingTask(id: string): void {
+    if (!id) return
+    const nagging = (this.state.nagging ??= {})
+    nagging.lastTaskId = id
+    nagging.recentTaskIds = [...(nagging.recentTaskIds ?? []).filter((item) => item !== id), id].slice(-3)
     this.persist()
   }
   setNaggingAgent(agent?: AgentNaggingPending): void {

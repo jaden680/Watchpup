@@ -35,6 +35,8 @@ export interface SlackNewsNaggingItem {
   postedAt: number
 }
 
+export type NaggingSource = 'slack' | 'work' | 'general'
+
 const TASK_LINES: ReadonlyArray<(title: string) => string> = [
   (title) => `“${title}” 아직 머릿속에 있죠?`,
   (title) => `잠깐! “${title}” 어디까지 했더라?`,
@@ -88,22 +90,40 @@ export function nextNaggingDelayMs(
 export function pickNaggingWorkItem(
   items: WorkItem[],
   touchedAt: Record<string, number>,
-  lastTaskId = '',
+  recentTaskIds: readonly string[] = [],
   now = Date.now(),
   rand: () => number = Math.random,
 ): WorkItem | null {
   const open = items.filter((item) => !item.completed && !item.parentId)
   if (!open.length) return null
 
-  const recentlyTouched = open.filter((item) => {
+  const cooldownSize = Math.min(3, Math.max(0, open.length - 1))
+  const cooldown = new Set(recentTaskIds.slice(-cooldownSize))
+  const available = open.filter((item) => !cooldown.has(item.id))
+  const pool = available.length ? available : open
+  const weighted = pool.flatMap((item) => {
     const touched = touchedAt[item.id]
-    return Number.isFinite(touched) && now - touched <= RECENT_WORK_MS
+    const isRecent = Number.isFinite(touched) && now - touched <= RECENT_WORK_MS
+    return isRecent ? [item, item] : [item]
   })
-  const preferred = recentlyTouched.length >= 2 ? recentlyTouched : open
-  const withoutLast = preferred.length > 1 ? preferred.filter((item) => item.id !== lastTaskId) : preferred
-  const pool = withoutLast.length ? withoutLast : preferred
-  const index = Math.min(pool.length - 1, Math.floor(Math.max(0, rand()) * pool.length))
-  return pool[index] ?? null
+  const index = Math.min(weighted.length - 1, Math.floor(Math.max(0, rand()) * weighted.length))
+  return weighted[index] ?? null
+}
+
+export function chooseNaggingSource(
+  hasWork: boolean,
+  hasSlackNews: boolean,
+  rand: () => number = Math.random,
+): NaggingSource {
+  const ratio = Math.max(0, Math.min(0.999999, rand()))
+  if (hasWork && hasSlackNews) {
+    if (ratio < 0.35) return 'slack'
+    if (ratio < 0.85) return 'work'
+    return 'general'
+  }
+  if (hasSlackNews) return ratio < 0.7 ? 'slack' : 'general'
+  if (hasWork) return ratio < 0.8 ? 'work' : 'general'
+  return 'general'
 }
 
 export function naggingLine(item: WorkItem | null, rand: () => number = Math.random): string {

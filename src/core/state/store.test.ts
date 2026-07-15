@@ -97,4 +97,15 @@ describe('StateStore', () => {
     restored.clearNaggingLog()
     expect(new StateStore(path).naggingLog()).toEqual([])
   })
+  it('remembers the latest three distinct Work nags and migrates the previous task id', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'watchpup-st-')), 'state.json')
+    const s = new StateStore(path)
+    s.setNagging({ lastTaskId: 'old' })
+    expect(s.naggingRecentTaskIds()).toEqual(['old'])
+
+    for (const id of ['a', 'b', 'c', 'd', 'c']) s.rememberNaggingTask(id)
+    const restored = new StateStore(path)
+    expect(restored.naggingRecentTaskIds()).toEqual(['b', 'd', 'c'])
+    expect(restored.get().nagging?.lastTaskId).toBe('c')
+  })
 })

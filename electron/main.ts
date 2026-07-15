@@ -20,6 +20,7 @@ import {
   calendarNaggingLine,
   naggingLine,
   nextNaggingDelayMs,
+  chooseNaggingSource,
   pickCalendarNaggingEvent,
   pickNaggingWorkItem,
   pickSlackNewsNagging,
@@ -730,18 +731,21 @@ async function main(): Promise<void> {
         ? await reminders.tasks(current.reminderListId, false)
         : []
       if (!configStore.get().naggingEnabled) return
-      const previous = state.get().nagging?.lastTaskId ?? ''
-      const item = pickNaggingWorkItem(items, state.workTouchedAt(), previous)
+      const item = pickNaggingWorkItem(items, state.workTouchedAt(), state.naggingRecentTaskIds())
       const news = current.slackNewsEnabled ? pickSlackNewsNagging(state.naggingSlackNews()) : null
-      const showNews = !!news && (!item || Math.random() < 0.45)
-      if (showNews && news) {
+      const source = chooseNaggingSource(!!item, !!news)
+      if (source === 'slack' && news) {
         state.dismissNaggingSlackNews(news.id)
         showNagging('slack', slackNewsNaggingLine(news), { slackNewsUrl: news.permalink }, `#${news.channelName}`)
         lastActivity = Date.now()
         return
       }
-      if (item) state.setNagging({ lastTaskId: item.id })
-      showNagging(item ? 'work' : 'general', naggingLine(item), { workItemId: item?.id }, item?.title)
+      if (source === 'work' && item) {
+        state.rememberNaggingTask(item.id)
+        showNagging('work', naggingLine(item), { workItemId: item.id }, item.title)
+      } else {
+        showNagging('general', naggingLine(null), {})
+      }
       lastActivity = Date.now()
     } catch (error) {
       console.warn('잔소리 작업 조회 실패', error)
