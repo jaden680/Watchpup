@@ -375,7 +375,16 @@
                 <input type="checkbox" name="naggingEnabled" />
                 시도 때도 없이 말 걸기
               </label>
-              <p class="nagging-copy">선택한 Work 목록의 미완료 작업을 몇 분 단위로 다시 꺼내줘요. 최근 열어본 작업을 우선하며, 기본값은 꺼짐입니다.</p>
+              <p class="nagging-copy">놓치기 쉬운 타이밍을 먼저 잡고, 평소에는 Work 작업을 몇 분 단위로 다시 꺼내줘요. 기본값은 꺼짐입니다.</p>
+              <ul class="nagging-priorities" aria-label="잔소리 우선순위">
+                <li><span>1</span>캘린더 일정 5분 전</li>
+                <li><span>2</span>Agent 작업 종료 후 반응이 없을 때</li>
+                <li><span>3</span>최근 열어본 미완료 Work 작업</li>
+              </ul>
+              <div class="nagging-calendar-access">
+                <span>처음 활성화하면 macOS 캘린더 접근 권한을 요청합니다.</span>
+                <button type="button" id="nagging-calendar-settings">캘린더 권한 설정</button>
+              </div>
               <div class="nagging-interval-row">
                 <label>
                   최소 간격
@@ -387,7 +396,7 @@
                   <span class="nagging-number"><input type="number" name="naggingMaxMinutes" min="1" max="120" step="1" value="12" /><span>분</span></span>
                 </label>
               </div>
-              <p id="nagging-hint" class="hint">활성화하면 5~12분 사이의 랜덤한 시점에 말풍선이 나타납니다.</p>
+              <p id="nagging-hint" class="hint">활성화하면 캘린더 접근 권한을 요청하고, 5~12분 사이의 랜덤한 시점에도 말풍선이 나타납니다.</p>
             </fieldset>
           </div>
 

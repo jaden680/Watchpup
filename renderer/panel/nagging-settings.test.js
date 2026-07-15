@@ -21,4 +21,13 @@ describe('잔소리 베타 설정', () => {
     expect(min?.value).toBe('5')
     expect(max?.value).toBe('12')
   })
+
+  it('캘린더, Agent, Work 순서의 타이밍 잔소리를 안내한다', () => {
+    const priorities = [...document.querySelectorAll('.nagging-priorities li')].map((item) => item.textContent)
+    expect(priorities).toHaveLength(3)
+    expect(priorities[0]).toContain('캘린더 일정 5분 전')
+    expect(priorities[1]).toContain('Agent 작업 종료 후')
+    expect(priorities[2]).toContain('미완료 Work 작업')
+    expect(document.getElementById('nagging-calendar-settings')?.textContent).toContain('캘린더 권한')
+  })
 })

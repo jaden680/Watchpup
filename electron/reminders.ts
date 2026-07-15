@@ -4,10 +4,11 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { parseWorkLinks } from '../src/core/work/links.js'
 import type { ReminderListRef, WorkItem } from '../src/core/work/types.js'
+import type { NaggingCalendarEvent } from '../src/core/presentation/nagging.js'
 
 const execFileAsync = promisify(execFile)
 
-export type ReminderCommand = 'lists' | 'tasks' | 'create' | 'add-subtask' | 'update-title' | 'update-user-note' | 'set-completed' | 'append-link'
+export type ReminderCommand = 'lists' | 'tasks' | 'create' | 'add-subtask' | 'update-title' | 'update-user-note' | 'set-completed' | 'append-link' | 'upcoming-events'
 export type ReminderCommandRunner = (command: ReminderCommand, args: string[]) => Promise<string>
 
 function resolveHelperPath(): string {
@@ -51,6 +52,22 @@ export class ReminderGateway {
     const raw = await this.runCommand('lists', [])
     const rows = JSON.parse(raw || '[]') as ReminderListRef[]
     return rows.sort((a, b) => `${a.account}/${a.name}`.localeCompare(`${b.account}/${b.name}`))
+  }
+
+  async upcomingEvents(startAt: number, endAt: number): Promise<NaggingCalendarEvent[]> {
+    const raw = await this.runCommand('upcoming-events', [String(startAt), String(endAt)])
+    const rows = JSON.parse(raw || '[]') as Array<Record<string, unknown>>
+    return rows
+      .map((row) => ({
+        id: String(row.id ?? ''),
+        title: String(row.title ?? '일정'),
+        startAt: dateMs(row.startAt) ?? 0,
+        endAt: dateMs(row.endAt) ?? 0,
+        calendarName: String(row.calendarName ?? ''),
+        location: typeof row.location === 'string' && row.location ? row.location : undefined,
+      }))
+      .filter((event) => Boolean(event.id) && event.startAt > 0)
+      .sort((a, b) => a.startAt - b.startAt)
   }
 
   async tasks(listId: string, includeCompleted = false): Promise<WorkItem[]> {

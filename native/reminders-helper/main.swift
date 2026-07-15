@@ -3,6 +3,7 @@ import Foundation
 
 enum HelperError: LocalizedError {
     case accessDenied
+    case calendarAccessDenied
     case invalidArguments(String)
     case listNotFound
     case reminderNotFound
@@ -11,6 +12,8 @@ enum HelperError: LocalizedError {
         switch self {
         case .accessDenied:
             return "미리 알림 전체 접근 권한이 필요합니다. 시스템 설정 > 개인정보 보호 및 보안 > 미리 알림에서 Watchpup을 허용해주세요."
+        case .calendarAccessDenied:
+            return "캘린더 전체 접근 권한이 필요합니다. 시스템 설정 > 개인정보 보호 및 보안 > 캘린더에서 Watchpup을 허용해주세요."
         case let .invalidArguments(message):
             return message
         case .listNotFound:
@@ -39,11 +42,42 @@ struct WatchpupRemindersHelper {
             throw HelperError.invalidArguments("명령이 없습니다.")
         }
         let store = EKEventStore()
-        guard try await requestAccess(store) else {
-            throw HelperError.accessDenied
+        if command == "upcoming-events" {
+            guard try await requestCalendarAccess(store) else {
+                throw HelperError.calendarAccessDenied
+            }
+        } else {
+            guard try await requestReminderAccess(store) else {
+                throw HelperError.accessDenied
+            }
         }
 
         switch command {
+        case "upcoming-events":
+            guard arguments.count >= 3,
+                  let startMilliseconds = Double(arguments[1]),
+                  let endMilliseconds = Double(arguments[2]) else {
+                throw HelperError.invalidArguments("upcoming-events에는 시작·종료 epoch millisecond가 필요합니다.")
+            }
+            let start = Date(timeIntervalSince1970: startMilliseconds / 1000)
+            let end = Date(timeIntervalSince1970: endMilliseconds / 1000)
+            let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+            return store.events(matching: predicate)
+                .filter { !$0.isAllDay && $0.status != .canceled }
+                .map { event in
+                    [
+                        "id": event.calendarItemIdentifier,
+                        "title": event.title ?? "일정",
+                        "startAt": dateString(event.startDate),
+                        "endAt": dateString(event.endDate),
+                        "calendarName": event.calendar.title,
+                        "location": event.location as Any? ?? NSNull(),
+                    ] as [String: Any]
+                }
+                .sorted { lhs, rhs in
+                    (lhs["startAt"] as? String ?? "") < (rhs["startAt"] as? String ?? "")
+                }
+
         case "lists":
             let allReminders = await fetchReminders(store, predicate: store.predicateForReminders(in: nil))
             let grouped = Dictionary(grouping: allReminders, by: { $0.calendar.calendarIdentifier })
@@ -198,8 +232,12 @@ struct WatchpupRemindersHelper {
         }
     }
 
-    private static func requestAccess(_ store: EKEventStore) async throws -> Bool {
+    private static func requestReminderAccess(_ store: EKEventStore) async throws -> Bool {
         try await store.requestFullAccessToReminders()
+    }
+
+    private static func requestCalendarAccess(_ store: EKEventStore) async throws -> Bool {
+        try await store.requestFullAccessToEvents()
     }
 
     private static func fetchReminders(_ store: EKEventStore, predicate: NSPredicate) async -> [EKReminder] {

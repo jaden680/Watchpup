@@ -35,6 +35,18 @@ describe('ReminderGateway', () => {
     expect(runner).toHaveBeenNthCalledWith(6, 'append-link', ['R1', 'Jira', 'https://example.atlassian.net/browse/APP-1'])
   })
 
+  it('캘린더 helper 결과를 시작 시각 순으로 변환한다', async () => {
+    const runner = vi.fn(async () => JSON.stringify([
+      { id: 'E2', title: '두 번째', startAt: '2026-07-15T03:10:00.000Z', endAt: '2026-07-15T03:40:00.000Z', calendarName: 'Work' },
+      { id: 'E1', title: '첫 번째', startAt: '2026-07-15T03:05:00.000Z', endAt: '2026-07-15T03:35:00.000Z', calendarName: 'Work', location: 'Zoom' },
+    ]))
+    const gateway = new ReminderGateway(runner)
+    const events = await gateway.upcomingEvents(1000, 2000)
+    expect(events.map((event) => event.id)).toEqual(['E1', 'E2'])
+    expect(events[0]).toMatchObject({ title: '첫 번째', location: 'Zoom', startAt: Date.parse('2026-07-15T03:05:00.000Z') })
+    expect(runner).toHaveBeenCalledWith('upcoming-events', ['1000', '2000'])
+  })
+
   it('빈 제목의 작업은 생성하지 않는다', async () => {
     const runner = vi.fn()
     const gateway = new ReminderGateway(runner)

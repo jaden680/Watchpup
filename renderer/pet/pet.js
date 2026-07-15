@@ -455,19 +455,29 @@ function showBubble(text, hideAfterMs) {
 
 let bubbleMentionId = null
 let bubbleWorkItemId = null
+let bubbleActivityId = null
+let bubbleCalendarEvent = false
+let bubbleCalendarPrivacy = false
 window.watchpup.onBubble((payload) => {
-  // payload: string(구버전/idle) 또는 { text, mentionId, workItemId }
+  // payload: string(구버전/idle) 또는 연결 대상이 포함된 말풍선 객체.
   const text = typeof payload === 'string' ? payload : payload && payload.text
   const id = typeof payload === 'object' && payload ? payload.mentionId : null
   const workItemId = typeof payload === 'object' && payload ? payload.workItemId : null
+  const activityId = typeof payload === 'object' && payload ? payload.activityId : null
+  const calendarEvent = typeof payload === 'object' && payload ? payload.calendarEvent === true : false
+  const calendarPrivacy = typeof payload === 'object' && payload ? payload.calendarPrivacy === true : false
   if (typeof text !== 'string' || !text) return
   if (chatStreaming) return
   bubbleMentionId = id || null
   bubbleWorkItemId = workItemId || null
+  bubbleActivityId = activityId || null
+  bubbleCalendarEvent = calendarEvent
+  bubbleCalendarPrivacy = calendarPrivacy
   bubble.classList.remove('streaming')
   hudMessage.classList.remove('streaming')
-  bubble.classList.toggle('clickable', !!bubbleMentionId || !!bubbleWorkItemId)
-  hudMessage.classList.toggle('clickable', !!bubbleMentionId || !!bubbleWorkItemId)
+  const clickable = !!bubbleMentionId || !!bubbleWorkItemId || !!bubbleActivityId || bubbleCalendarEvent || bubbleCalendarPrivacy
+  bubble.classList.toggle('clickable', clickable)
+  hudMessage.classList.toggle('clickable', clickable)
   showBubble(text, 30000)
 })
 
@@ -509,9 +519,12 @@ activityHud.addEventListener('click', (event) => {
 })
 // 말풍선 클릭 → 스레드가 연결돼 있으면 그 스레드를 열고, 아니면 패널을 연다.
 function openBubbleTarget() {
-  const target = bubbleOpenTarget(bubbleMentionId, bubbleWorkItemId)
+  const target = bubbleOpenTarget(bubbleMentionId, bubbleWorkItemId, bubbleActivityId, bubbleCalendarEvent, bubbleCalendarPrivacy)
   if (target.kind === 'mention') window.watchpup.openMention(target.id)
   else if (target.kind === 'work') window.watchpup.openWorkItem(target.id)
+  else if (target.kind === 'activity') window.watchpup.openActivityDetail(target.id)
+  else if (target.kind === 'calendar-privacy') window.watchpup.openCalendarPrivacy()
+  else if (target.kind === 'calendar') window.watchpup.openCalendar()
   else window.watchpup.showPanel()
   hideBubbleSurface()
 }

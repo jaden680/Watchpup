@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { compareSlackTs } from '../slack/timestamp.js'
+import type { AgentNaggingPending } from '../presentation/nagging.js'
 
 export interface WindowBounds {
   x?: number
@@ -23,8 +24,13 @@ export interface WatchpupState {
   threadCursor: Record<string, string>
   /** Work 항목을 사용자가 마지막으로 열어본 시각. 잔소리 후보 우선순위에만 사용한다. */
   workTouchedAt?: Record<string, number>
-  /** 잔소리 타이머가 재실행 후에도 몰리지 않도록 다음 시각과 직전 대상을 기억한다. */
-  nagging?: { nextAt?: number; lastTaskId?: string }
+  /** 잔소리 타이머와 이미 알린 우선순위 이벤트를 재실행 뒤에도 기억한다. */
+  nagging?: {
+    nextAt?: number
+    lastTaskId?: string
+    agent?: AgentNaggingPending
+    calendarNotified?: Record<string, number>
+  }
 }
 
 const EMPTY: WatchpupState = { dedup: {}, badge: 0, threadToMentionId: {}, threadCursor: {} }
@@ -83,6 +89,24 @@ export class StateStore {
   workTouchedAt(): Record<string, number> { return { ...(this.state.workTouchedAt ?? {}) } }
   setNagging(next: { nextAt?: number; lastTaskId?: string }): void {
     this.state.nagging = { ...(this.state.nagging ?? {}), ...next }
+    this.persist()
+  }
+  setNaggingAgent(agent?: AgentNaggingPending): void {
+    const nagging = (this.state.nagging ??= {})
+    if (agent) nagging.agent = agent
+    else delete nagging.agent
+    this.persist()
+  }
+  naggingCalendarNotified(): Record<string, number> {
+    return { ...(this.state.nagging?.calendarNotified ?? {}) }
+  }
+  markNaggingCalendar(key: string, at = Date.now()): void {
+    const notified = ((this.state.nagging ??= {}).calendarNotified ??= {})
+    notified[key] = at
+    const cutoff = at - 24 * 60 * 60 * 1000
+    for (const [eventKey, value] of Object.entries(notified)) {
+      if (!Number.isFinite(value) || value < cutoff) delete notified[eventKey]
+    }
     this.persist()
   }
 

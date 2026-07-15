@@ -139,6 +139,7 @@ const naggingMinInput = settingsForm.elements['naggingMinMinutes']
 const naggingMaxInput = settingsForm.elements['naggingMaxMinutes']
 const naggingCard = document.querySelector('.nagging-card')
 const naggingHint = document.getElementById('nagging-hint')
+const naggingCalendarSettings = document.getElementById('nagging-calendar-settings')
 
 function renderModelOptions(current, available) {
   const modelState = modelOptionsWithCurrent(current, available)
@@ -210,7 +211,7 @@ function updateNaggingControls() {
   const max = Math.max(min, naggingMinutes(naggingMaxInput, 12))
   if (naggingHint) {
     naggingHint.textContent = enabled
-      ? `${min}~${max}분 사이의 랜덤한 시점에 미완료 작업을 말풍선으로 다시 꺼냅니다.`
+      ? `캘린더·Agent 타이밍을 먼저 알리고, 그 외에는 ${min}~${max}분 사이에 미완료 작업을 다시 꺼냅니다.`
       : '현재 꺼져 있어요. 활성화해야 잔소리가 시작됩니다.'
   }
 }
@@ -222,6 +223,7 @@ if (showActivityHudInput) showActivityHudInput.addEventListener('change', update
 if (naggingEnabledInput) naggingEnabledInput.addEventListener('change', updateNaggingControls)
 if (naggingMinInput) naggingMinInput.addEventListener('input', updateNaggingControls)
 if (naggingMaxInput) naggingMaxInput.addEventListener('input', updateNaggingControls)
+if (naggingCalendarSettings) naggingCalendarSettings.addEventListener('click', () => window.watchpup.openCalendarPrivacy())
 
 async function loadSettings() {
   const cfg = await window.watchpup.settingsGet()

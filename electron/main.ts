@@ -13,7 +13,16 @@ import { MentionStore } from '../src/core/state/mentions.js'
 import { LessonStore } from '../src/core/state/lessons.js'
 import { bubbleReady as bubbleReadyText, bubbleFollowup as bubbleFollowupText, bubbleAnalyzing as bubbleAnalyzingText, type BubbleStyle } from '../src/core/presentation/bubble.js'
 import { pickIdleLine } from '../src/core/presentation/idle.js'
-import { naggingLine, nextNaggingDelayMs, pickNaggingWorkItem } from '../src/core/presentation/nagging.js'
+import {
+  agentNaggingLine,
+  agentNaggingPending,
+  calendarEventKey,
+  calendarNaggingLine,
+  naggingLine,
+  nextNaggingDelayMs,
+  pickCalendarNaggingEvent,
+  pickNaggingWorkItem,
+} from '../src/core/presentation/nagging.js'
 import { WatchpupGateway } from '../src/core/slack/gateway.js'
 import { generateQuips } from '../src/core/watchpup/quips.js'
 import { parseSkillMd } from '../src/core/watchpup/skill-import.js'
@@ -199,6 +208,7 @@ async function main(): Promise<void> {
     activePanel()?.hide()
   })
   panel.on('hide', () => setPanelSwitcherVisibility(app, false))
+  panel.on('focus', () => acknowledgeAgentNagging())
   // Cmd+Tab으로 Watchpup이 다시 활성화될 때 이미 열려 있는 상세 패널을 앞으로 가져온다.
   // 숨겨진 패널은 건드리지 않아 펫 더블클릭으로만 여는 동작을 유지한다.
   app.on('did-become-active', () => focusVisiblePanel(activePanel()))
@@ -279,6 +289,7 @@ async function main(): Promise<void> {
   function openActivityPanel(id: string): void {
     const win = activePanel()
     if (!win) return
+    acknowledgeAgentNagging()
     activatePanel(win)
     clearPanelBadge()
     send(win, 'activity.focus', id)
@@ -320,6 +331,7 @@ async function main(): Promise<void> {
   ipcMain.on('activity.open', (_e, id: string) => {
     const target = activityTarget(id)
     if (!target) return
+    acknowledgeAgentNagging()
     if (target.kind === 'external') {
       void shell.openExternal(target.url)
     } else {
@@ -330,6 +342,12 @@ async function main(): Promise<void> {
   })
   ipcMain.on('pet.setMouseIgnore', (_e, ignore: boolean) => {
     if (pet) pet.setIgnoreMouseEvents(!!ignore, { forward: true })
+  })
+  ipcMain.on('pet.openCalendar', () => {
+    void shell.openPath('/System/Applications/Calendar.app')
+  })
+  ipcMain.on('calendar.privacy.open', () => {
+    void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars')
   })
   // permalink 등 외부 링크는 기본 브라우저로 (창 네비게이션 방지)
   ipcMain.on('open.external', (_e, url: string) => {
@@ -551,8 +569,32 @@ async function main(): Promise<void> {
     broadcastActivities()
   })
 
+  const agentBatchIds = new Set<string>()
   agentPoller = new LocalAgentPoller()
   agentPoller.on('snapshot', (activities: ActivitySession[]) => {
+    const running = activities.filter((activity) => activity.state === 'running')
+    if (running.length) {
+      for (const activity of running) agentBatchIds.add(activity.id)
+      const pending = state.get().nagging?.agent
+      if (pending && running.some((activity) => activity.id === pending.activityId && activity.messages?.at(-1)?.role === 'user')) {
+        acknowledgeAgentNagging()
+      }
+    } else if (agentBatchIds.size) {
+      const current = configStore.get()
+      const dueAt = Date.now() + Math.max(1, current.naggingMinMinutes) * 60_000
+      const pending = agentNaggingPending(agentBatchIds, activities, dueAt)
+      const previous = state.get().nagging?.agent
+      if (pending && current.naggingEnabled && !activePanel()?.isFocused()) {
+        state.setNaggingAgent(previous ? {
+          ...pending,
+          count: previous.count + pending.count,
+          dueAt: Math.min(previous.dueAt, pending.dueAt),
+          repeatCount: previous.repeatCount,
+          waiting: previous.waiting || pending.waiting,
+        } : pending)
+      }
+      agentBatchIds.clear()
+    }
     localActivities = activities
     broadcastActivities()
   })
@@ -588,15 +630,24 @@ async function main(): Promise<void> {
     lastActivity = Date.now() // 다음 혼잣말까지 간격 확보
   }, 4 * 60 * 1000)
 
-  // 베타 `잔소리`: 최근 열어본 Work 항목을 우선해 몇 분 단위의 랜덤 간격으로 상기한다.
-  // 다음 예정 시각을 상태에 저장해 앱 재실행 직후 말풍선이 몰리지 않게 한다.
+  // 베타 `잔소리`: 캘린더 임박 일정 → 확인하지 않은 Agent 완료 → Work 순서로 상기한다.
+  // 다음 예정 시각과 이미 알린 대상을 저장해 앱 재실행 뒤에도 중복 알림을 피한다.
   let naggingTimer: NodeJS.Timeout | null = null
+  let priorityNaggingBusy = false
+  let calendarRetryAt = 0
+  let calendarPermissionNagged = false
+
+  function acknowledgeAgentNagging(): void {
+    if (state.get().nagging?.agent) state.setNaggingAgent(undefined)
+  }
+
   function scheduleNagging(reset = false): void {
     if (naggingTimer) clearTimeout(naggingTimer)
     naggingTimer = null
     const current = configStore.get()
     if (!current.naggingEnabled) {
       state.setNagging({ nextAt: undefined })
+      acknowledgeAgentNagging()
       return
     }
     const now = Date.now()
@@ -608,10 +659,54 @@ async function main(): Promise<void> {
     naggingTimer = setTimeout(() => { void runNagging() }, Math.max(1000, nextAt - now))
   }
 
+  async function runPriorityNagging(): Promise<boolean> {
+    if (priorityNaggingBusy || !configStore.get().naggingEnabled || !pet || pet.isDestroyed()) return false
+    priorityNaggingBusy = true
+    try {
+      const now = Date.now()
+      if (now >= calendarRetryAt) {
+        try {
+          const events = await reminders.upcomingEvents(now - 60_000, now + 6 * 60_000)
+          const event = pickCalendarNaggingEvent(events, state.naggingCalendarNotified(), now)
+          if (event) {
+            state.markNaggingCalendar(calendarEventKey(event), now)
+            send(pet, EVT.bubble, { text: calendarNaggingLine(event, now), calendarEvent: true })
+            lastActivity = now
+            return true
+          }
+        } catch (error) {
+          calendarRetryAt = now + 15 * 60_000
+          console.warn('잔소리 캘린더 조회 실패', error)
+          if (!calendarPermissionNagged && String((error as Error)?.message || error).includes('캘린더 전체 접근 권한')) {
+            calendarPermissionNagged = true
+            send(pet, EVT.bubble, { text: '캘린더 일정도 알려주려면 권한이 필요해요. 눌러서 허용해줘!', calendarPrivacy: true })
+            return true
+          }
+        }
+      }
+
+      const pending = state.get().nagging?.agent
+      if (pending && pending.dueAt <= now) {
+        send(pet, EVT.bubble, { text: agentNaggingLine(pending), activityId: pending.activityId })
+        state.setNaggingAgent({
+          ...pending,
+          dueAt: now + nextNaggingDelayMs(configStore.get().naggingMinMinutes, configStore.get().naggingMaxMinutes),
+          repeatCount: pending.repeatCount + 1,
+        })
+        lastActivity = now
+        return true
+      }
+      return false
+    } finally {
+      priorityNaggingBusy = false
+    }
+  }
+
   async function runNagging(): Promise<void> {
     try {
       const current = configStore.get()
       if (!current.naggingEnabled || !pet || pet.isDestroyed()) return
+      if (await runPriorityNagging()) return
       const items = current.reminderListId
         ? await reminders.tasks(current.reminderListId, false)
         : []
@@ -629,6 +724,8 @@ async function main(): Promise<void> {
   }
 
   scheduleNagging()
+  setInterval(() => { void runPriorityNagging() }, 30_000)
+  setTimeout(() => { void runPriorityNagging() }, 2_000)
 
   // 4) 감지원 부착: 봇(소켓) / 내 계정 검색 폴링 — config 플래그 + 토큰 존재 시
   const botToken = await keychain.get(SecretKeys.slackBotToken)
@@ -721,6 +818,7 @@ async function main(): Promise<void> {
     if (pet && !pet.isDestroyed()) pet.setAlwaysOnTop(c.petAlwaysOnTop) // 즉시 반영
     if ('naggingEnabled' in patch || 'naggingMinMinutes' in patch || 'naggingMaxMinutes' in patch) {
       scheduleNagging(true)
+      if (c.naggingEnabled) void runPriorityNagging()
     }
   })
   // 토큰: 존재 여부만 조회 / 값 저장은 Keychain에만 (설정 변경은 재시작 후 반영)
