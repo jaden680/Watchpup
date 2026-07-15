@@ -169,7 +169,7 @@ body.hud-align-right { align-items: flex-end; }
   width: 100%;
   height: var(--hud-row-height);
   display: grid;
-  grid-template-columns: var(--hud-dot-column) var(--hud-icon-column) minmax(0, 1fr) auto auto auto auto;
+  grid-template-columns: var(--hud-dot-column) var(--hud-icon-column) minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: var(--hud-row-gap);
   padding: 0 var(--hud-row-padding);
@@ -232,35 +232,6 @@ body.hud-align-right { align-items: flex-end; }
   text-align: right;
   white-space: nowrap;
 }
-.activity-open {
-  grid-column: 7;
-  width: calc(var(--hud-icon-size) + 2px);
-  height: calc(var(--hud-icon-size) + 2px);
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid rgba(168, 200, 243, 0.26);
-  border-radius: 999px;
-  background: rgba(83, 155, 245, 0.1);
-  color: #b9d5f7;
-  cursor: pointer;
-}
-.activity-open svg {
-  width: max(11px, calc(var(--hud-icon-size) * 0.58));
-  height: max(11px, calc(var(--hud-icon-size) * 0.58));
-  overflow: visible;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  pointer-events: none;
-}
-.activity-open[hidden] { display: none; }
-.activity-open:hover { background: rgba(83, 155, 245, 0.2); color: #e0edfc; }
-.activity-open:active { background: rgba(83, 155, 245, 0.28); }
-.activity-open:focus-visible { outline: 2px solid rgba(83, 155, 245, 0.9); outline-offset: 1px; }
-.activity-open:disabled { opacity: 0.4; cursor: default; }
 
 /* ---- 말풍선 ---- */
 .bubble {

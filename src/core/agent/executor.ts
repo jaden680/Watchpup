@@ -53,7 +53,7 @@ function claudeBin(): string {
   return process.env.WATCHPUP_CLAUDE_BIN || 'claude'
 }
 
-function buildArgs(opts: RunOptions): string[] {
+export function buildClaudeArgs(opts: RunOptions): string[] {
   const { config } = opts
   const args = [
     '-p',
@@ -61,13 +61,10 @@ function buildArgs(opts: RunOptions): string[] {
     'stream-json',
     '--verbose',
     '--include-partial-messages',
-    '--model',
-    config.model,
-    '--agents',
-    JSON.stringify(opts.agents),
-    '--append-system-prompt',
-    opts.systemPrompt,
   ]
+  // /model의 Default는 CLI가 기억한 계정 기본 모델을 사용한다.
+  if (config.model !== 'default') args.push('--model', config.model)
+  args.push('--agents', JSON.stringify(opts.agents), '--append-system-prompt', opts.systemPrompt)
   // dev 워크플로우: 격리 worktree에서 자율 편집/git — 권한 bypass. 그 외엔 permission-mode.
   if (opts.dangerous) args.push('--dangerously-skip-permissions')
   else args.push('--permission-mode', opts.permissionMode ?? 'default')
@@ -97,7 +94,7 @@ export function runClaude(opts: RunOptions): Promise<AgentResult> {
   const cwd = opts.cwd ?? config.workDir
   if (!existsSync(cwd)) mkdirSync(cwd, { recursive: true })
 
-  const args = buildArgs(opts)
+  const args = buildClaudeArgs(opts)
   const env = { ...process.env, ...(opts.secretEnv ?? {}), CLAUDECODE: '' }
   const parser = new StreamJsonParser()
 

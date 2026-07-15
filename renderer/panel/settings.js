@@ -3,6 +3,7 @@
 import { playbooks, playbookById } from './playbooks.js'
 import { lessonKeyLabel } from './format.js'
 import { copyToClipboard } from './richtext.js'
+import { modelOptionsWithCurrent } from './model-options.js'
 
 // Slack 봇 생성용 앱 매니페스트 (From an app manifest 에 붙여넣기).
 // scope는 코드가 실제 호출하는 API에 맞춤: conversations.replies/info, chat.postMessage,
@@ -130,6 +131,51 @@ const showActivityHudInput = settingsForm.elements['showActivityHud']
 const hudSizeField = document.getElementById('hud-size-field')
 const hudAlignmentInput = settingsForm.elements['hudAlignment']
 const hudAlignmentField = document.getElementById('hud-alignment-field')
+const modelSelect = settingsForm.elements['model']
+const modelRefreshButton = document.getElementById('model-refresh')
+const modelHint = document.getElementById('model-hint')
+const naggingEnabledInput = settingsForm.elements['naggingEnabled']
+const naggingMinInput = settingsForm.elements['naggingMinMinutes']
+const naggingMaxInput = settingsForm.elements['naggingMaxMinutes']
+const naggingCard = document.querySelector('.nagging-card')
+const naggingHint = document.getElementById('nagging-hint')
+const naggingCalendarSettings = document.getElementById('nagging-calendar-settings')
+
+function renderModelOptions(current, available) {
+  const modelState = modelOptionsWithCurrent(current, available)
+  modelSelect.replaceChildren(...modelState.options.map(({ value, label, custom }) => {
+    const option = document.createElement('option')
+    option.value = value
+    option.textContent = label
+    if (custom) option.dataset.custom = 'true'
+    return option
+  }))
+  modelSelect.value = modelState.selected
+}
+
+function modelCatalogHint(catalog) {
+  if (catalog.source === 'fallback') return `CLI 조회 실패 · 기본 목록 사용${catalog.error ? ` (${catalog.error})` : ''}`
+  const fetched = catalog.fetchedAt ? new Date(catalog.fetchedAt).toLocaleString('ko-KR') : ''
+  const cached = catalog.cached ? '마지막 조회' : '방금 조회'
+  return `${catalog.options.length}개 모델 · Claude CLI ${catalog.cliVersion} · ${cached}${fetched ? ` ${fetched}` : ''}`
+}
+
+async function loadModelCatalog(current, force = false) {
+  if (!modelSelect) return
+  modelRefreshButton.disabled = true
+  modelHint.textContent = force ? 'Claude CLI에서 모델 목록 새로고침 중…' : '모델 목록 확인 중…'
+  try {
+    const catalog = force ? await window.watchpup.modelCatalogRefresh() : await window.watchpup.modelCatalogGet()
+    renderModelOptions(modelSelect.value || current, catalog.options)
+    modelHint.textContent = modelCatalogHint(catalog)
+  } catch (error) {
+    modelHint.textContent = error?.message || 'Claude CLI 모델 목록을 읽지 못했습니다.'
+  } finally {
+    modelRefreshButton.disabled = false
+  }
+}
+
+modelRefreshButton?.addEventListener('click', () => loadModelCatalog(modelSelect.value, true))
 
 function updatePetSizeLabel() {
   if (petSizeInput && petSizeValue) petSizeValue.textContent = `${petSizeInput.value}%`
@@ -151,10 +197,33 @@ function updateHudControls() {
   if (hudAlignmentField) hudAlignmentField.classList.toggle('is-disabled', !enabled)
 }
 
+function naggingMinutes(input, fallback) {
+  const value = parseInt(input?.value || '', 10)
+  return Number.isFinite(value) ? Math.max(1, Math.min(120, value)) : fallback
+}
+
+function updateNaggingControls() {
+  const enabled = !!naggingEnabledInput?.checked
+  if (naggingMinInput) naggingMinInput.disabled = !enabled
+  if (naggingMaxInput) naggingMaxInput.disabled = !enabled
+  naggingCard?.classList.toggle('is-disabled', !enabled)
+  const min = naggingMinutes(naggingMinInput, 5)
+  const max = Math.max(min, naggingMinutes(naggingMaxInput, 12))
+  if (naggingHint) {
+    naggingHint.textContent = enabled
+      ? `캘린더·Agent 타이밍을 먼저 알리고, 그 외에는 ${min}~${max}분 사이에 미완료 작업을 다시 꺼냅니다.`
+      : '현재 꺼져 있어요. 활성화해야 잔소리가 시작됩니다.'
+  }
+}
+
 if (petSizeInput) petSizeInput.addEventListener('input', updatePetSizeLabel)
 if (bubbleSizeInput) bubbleSizeInput.addEventListener('input', updateBubbleSizeLabel)
 if (hudSizeInput) hudSizeInput.addEventListener('input', updateHudSizeLabel)
 if (showActivityHudInput) showActivityHudInput.addEventListener('change', updateHudControls)
+if (naggingEnabledInput) naggingEnabledInput.addEventListener('change', updateNaggingControls)
+if (naggingMinInput) naggingMinInput.addEventListener('input', updateNaggingControls)
+if (naggingMaxInput) naggingMaxInput.addEventListener('input', updateNaggingControls)
+if (naggingCalendarSettings) naggingCalendarSettings.addEventListener('click', () => window.watchpup.openCalendarPrivacy())
 
 async function loadSettings() {
   const cfg = await window.watchpup.settingsGet()
@@ -167,10 +236,14 @@ async function loadSettings() {
   if (hudSizeInput) hudSizeInput.value = String(cfg.hudSizePercent ?? 100)
   if (hudAlignmentInput) hudAlignmentInput.value = cfg.hudAlignment === 'left' ? 'left' : 'right'
   if (showActivityHudInput) showActivityHudInput.checked = cfg.showActivityHud !== false
+  if (naggingEnabledInput) naggingEnabledInput.checked = cfg.naggingEnabled === true
+  if (naggingMinInput) naggingMinInput.value = String(cfg.naggingMinMinutes ?? 5)
+  if (naggingMaxInput) naggingMaxInput.value = String(cfg.naggingMaxMinutes ?? 12)
   updatePetSizeLabel()
   updateBubbleSizeLabel()
   updateHudSizeLabel()
   updateHudControls()
+  updateNaggingControls()
   if (settingsForm.elements['persona']) settingsForm.elements['persona'].value = cfg.persona || ''
   if (settingsForm.elements['bubbleStyle']) settingsForm.elements['bubbleStyle'].value = cfg.bubbleStyle || 'status'
   const petimgPathEl = document.getElementById('petimg-path')
@@ -184,7 +257,8 @@ async function loadSettings() {
   settingsForm.elements['obsidian.vaultPath'].value = cfg.obsidian?.vaultPath || ''
   settingsForm.elements['obsidian.folder'].value = cfg.obsidian?.folder || ''
   updateObsidianHint()
-  settingsForm.elements['model'].value = cfg.model || ''
+  renderModelOptions(cfg.model)
+  void loadModelCatalog(cfg.model)
   await refreshTokenStatus()
   await renderGroups()
   await renderRepos()
@@ -202,7 +276,12 @@ async function renderIntegrations() {
   const nD = document.getElementById('notion-disconnect')
   if (nD) nD.classList.toggle('hidden', !st.notion.connected)
   const jS = document.getElementById('integ-jira-status')
-  if (jS) { jS.textContent = st.jira.connected ? '● 연결됨' : '○ 미연결'; jS.className = 'integ-status ' + (st.jira.connected ? 'on' : '') }
+  if (jS) {
+    const needsReconnect = st.jira.connected && st.jira.authenticated === false
+    jS.textContent = needsReconnect ? '● 재연결 필요' : st.jira.connected ? '● 연결됨' : '○ 미연결'
+    jS.className = 'integ-status ' + (needsReconnect ? 'warn' : st.jira.connected ? 'on' : '')
+    jS.title = needsReconnect ? (st.jira.error || 'Jira API Token을 다시 입력해주세요.') : ''
+  }
   const jD = document.getElementById('jira-disconnect')
   if (jD) jD.classList.toggle('hidden', !st.jira.connected)
   if (st.jira.site) document.getElementById('jira-site').value = st.jira.site
@@ -234,14 +313,18 @@ document.getElementById('jira-connect')?.addEventListener('click', async () => {
   const token = document.getElementById('jira-token').value.trim()
   const status = await window.watchpup.integrationStatus()
   if (!site || !email) { msg.textContent = '사이트·이메일 필수'; return }
-  if (!token && !status.jira.connected) { msg.textContent = 'API 토큰을 입력하세요'; return }
+  if (!token && (!status.jira.connected || status.jira.authenticated === false)) { msg.textContent = '새 API 토큰을 입력하세요'; return }
   msg.textContent = '연결 중…'
   try {
     await window.watchpup.connectJira({ site, email, token })
     document.getElementById('jira-token').value = ''
-    msg.textContent = '연결됨 (다음 분석부터 적용)'
     await renderIntegrations(); await renderMcpList()
+    const verified = await window.watchpup.integrationStatus()
+    msg.textContent = verified.jira.authenticated ? '연결됨' : (verified.jira.error || '인증 확인 실패')
   } catch (e) { msg.textContent = '실패: ' + (e?.message || e) }
+})
+document.getElementById('jira-token-page')?.addEventListener('click', () => {
+  window.watchpup.openExternal('https://id.atlassian.com/manage-profile/security/api-tokens')
 })
 document.getElementById('jira-disconnect')?.addEventListener('click', async () => {
   if (!confirm('Jira 연동을 해제할까요?')) return
@@ -544,6 +627,9 @@ settingsForm.addEventListener('submit', async (e) => {
     hudSizePercent: hudSizeInput ? parseInt(hudSizeInput.value, 10) : 100,
     hudAlignment: hudAlignmentInput?.value === 'left' ? 'left' : 'right',
     showActivityHud: showActivityHudInput ? showActivityHudInput.checked : true,
+    naggingEnabled: naggingEnabledInput ? naggingEnabledInput.checked : false,
+    naggingMinMinutes: naggingMinutes(naggingMinInput, 5),
+    naggingMaxMinutes: Math.max(naggingMinutes(naggingMinInput, 5), naggingMinutes(naggingMaxInput, 12)),
     persona: settingsForm.elements['persona'] ? settingsForm.elements['persona'].value.trim() : '',
     bubbleStyle: settingsForm.elements['bubbleStyle'] ? settingsForm.elements['bubbleStyle'].value : 'status',
     enableBot: settingsForm.elements['enableBot'].checked,

@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { compareSlackTs } from '../slack/timestamp.js'
+import type { AgentNaggingPending } from '../presentation/nagging.js'
 
 export interface WindowBounds {
   x?: number
@@ -21,6 +22,15 @@ export interface WatchpupState {
   threadToMentionId: Record<string, string>
   /** threadKey(channel:threadTs) → 그 스레드에서 마지막으로 확인한 메시지 ts (후속 폴링 커서) */
   threadCursor: Record<string, string>
+  /** Work 항목을 사용자가 마지막으로 열어본 시각. 잔소리 후보 우선순위에만 사용한다. */
+  workTouchedAt?: Record<string, number>
+  /** 잔소리 타이머와 이미 알린 우선순위 이벤트를 재실행 뒤에도 기억한다. */
+  nagging?: {
+    nextAt?: number
+    lastTaskId?: string
+    agent?: AgentNaggingPending
+    calendarNotified?: Record<string, number>
+  }
 }
 
 const EMPTY: WatchpupState = { dedup: {}, badge: 0, threadToMentionId: {}, threadCursor: {} }
@@ -63,6 +73,40 @@ export class StateStore {
   getWindowBounds(key: string): WindowBounds | undefined { return this.state.windowBounds?.[key] }
   setWindowBounds(key: string, b: WindowBounds): void {
     ;(this.state.windowBounds ??= {})[key] = b
+    this.persist()
+  }
+
+  touchWorkItem(id: string, at = Date.now()): void {
+    if (!id) return
+    const touched = (this.state.workTouchedAt ??= {})
+    touched[id] = at
+    const cutoff = at - 30 * 24 * 60 * 60 * 1000
+    for (const [key, value] of Object.entries(touched)) {
+      if (!Number.isFinite(value) || value < cutoff) delete touched[key]
+    }
+    this.persist()
+  }
+  workTouchedAt(): Record<string, number> { return { ...(this.state.workTouchedAt ?? {}) } }
+  setNagging(next: { nextAt?: number; lastTaskId?: string }): void {
+    this.state.nagging = { ...(this.state.nagging ?? {}), ...next }
+    this.persist()
+  }
+  setNaggingAgent(agent?: AgentNaggingPending): void {
+    const nagging = (this.state.nagging ??= {})
+    if (agent) nagging.agent = agent
+    else delete nagging.agent
+    this.persist()
+  }
+  naggingCalendarNotified(): Record<string, number> {
+    return { ...(this.state.nagging?.calendarNotified ?? {}) }
+  }
+  markNaggingCalendar(key: string, at = Date.now()): void {
+    const notified = ((this.state.nagging ??= {}).calendarNotified ??= {})
+    notified[key] = at
+    const cutoff = at - 24 * 60 * 60 * 1000
+    for (const [eventKey, value] of Object.entries(notified)) {
+      if (!Number.isFinite(value) || value < cutoff) delete notified[eventKey]
+    }
     this.persist()
   }
 

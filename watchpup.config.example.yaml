@@ -11,7 +11,12 @@ petSizePercent: 100
 bubbleSizePercent: 100
 hudSizePercent: 100
 hudAlignment: right    # left | right
-showActivityHud: true
+showActivityHud: false
+
+# 베타: 선택한 Work 목록의 미완료 작업을 랜덤 간격으로 말풍선에서 상기
+naggingEnabled: false
+naggingMinMinutes: 5
+naggingMaxMinutes: 12
 
 # 감지 대상 = 나 (필수) — Slack 프로필의 member ID (예: U01ABCDEF)
 mySlackUserId: ""

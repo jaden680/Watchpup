@@ -1,5 +1,6 @@
 import { build } from 'esbuild'
 import { writeFileSync } from 'node:fs'
+import './scripts/build-reminders-helper.mjs'
 
 const common = {
   bundle: true,
