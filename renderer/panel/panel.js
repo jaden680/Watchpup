@@ -9,7 +9,7 @@ import { state, getChat, getActionLog, sortedMentions, nav } from './store.js'
 import { renderDigest, renderTodosView } from './views.js'
 import { renderActivityDetail, renderDetail } from './detail.js'
 import { focusWorkItem, initWorkView, refreshWorkView } from './work.js'
-import { normalizePanelTab, readPanelTab, writePanelTab } from './tab-state.js'
+import { normalizePanelTab, readPanelTab, writePanelTab, PANEL_TAB_ORDER, keyToTabIndex, cycleTabIndex } from './tab-state.js'
 
 // playbook 변경 시 열린 상세의 액션 버튼 갱신(settings→panel 결합을 훅으로만)
 setOnPlaybooksChanged(() => {
@@ -380,6 +380,21 @@ document.addEventListener('keydown', (e) => {
   } else {
     window.watchpup.hidePanel()
   }
+})
+// Cmd+1..9: 탭 즉시 전환
+document.addEventListener('keydown', (e) => {
+  if (!e.metaKey) return
+  if (e.key === '[' || e.key === ']') {
+    const current = PANEL_TAB_ORDER.indexOf(readPanelTab())
+    const next = cycleTabIndex(current, e.key === '[' ? -1 : 1, PANEL_TAB_ORDER.length)
+    activateTab(PANEL_TAB_ORDER[next])
+    e.preventDefault()
+    return
+  }
+  const index = keyToTabIndex(e.key, PANEL_TAB_ORDER.length)
+  if (index === null) return
+  activateTab(PANEL_TAB_ORDER[index])
+  e.preventDefault()
 })
 // 맥 스타일 창 컨트롤(신호등)
 const wcClose = document.getElementById('wc-close')
