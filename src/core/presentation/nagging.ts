@@ -24,6 +24,17 @@ export interface NaggingCalendarEvent {
   location?: string
 }
 
+export interface SlackNewsNaggingItem {
+  id: string
+  channel: string
+  channelName: string
+  messageTs: string
+  text: string
+  permalink: string
+  matchedBy: string
+  postedAt: number
+}
+
 const TASK_LINES: ReadonlyArray<(title: string) => string> = [
   (title) => `“${title}” 아직 머릿속에 있죠?`,
   (title) => `잠깐! “${title}” 어디까지 했더라?`,
@@ -155,4 +166,20 @@ export function calendarNaggingLine(event: NaggingCalendarEvent, now = Date.now(
   const where = event.location ? ` · ${event.location}` : ''
   if (minutes <= 0) return `“${event.title}” 지금 시작해요! 이제 스케줄 가야 함~!${where}`
   return `${minutes}분 뒤 “${event.title}” 일정이에요. 이제 스케줄 갈 준비~!${where}`
+}
+
+export function pickSlackNewsNagging(
+  items: SlackNewsNaggingItem[],
+  rand: () => number = Math.random,
+): SlackNewsNaggingItem | null {
+  if (!items.length) return null
+  const index = Math.min(items.length - 1, Math.floor(Math.max(0, rand()) * items.length))
+  return items[index] ?? null
+}
+
+export function slackNewsNaggingLine(item: SlackNewsNaggingItem, maxLength = 82): string {
+  const text = item.text.replace(/\s+/g, ' ').trim()
+  const snippet = text.length > maxLength ? `${text.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…` : text
+  const channel = item.channelName.replace(/^#/, '') || item.channel
+  return `#${channel} 새 소식! ${snippet || '새 글이 올라왔어요.'} · 보러갈래?`
 }

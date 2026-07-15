@@ -64,4 +64,23 @@ describe('StateStore', () => {
     restored.setNaggingAgent(undefined)
     expect(new StateStore(path).get().nagging?.agent).toBeUndefined()
   })
+  it('persists Slack news cursors and de-duplicates pending news', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'watchpup-st-')), 'state.json')
+    const s = new StateStore(path)
+    const now = Date.now()
+    const news = { id: 'C1:100', channel: 'C1', channelName: 'all_random', messageTs: '100', text: '소식', permalink: 'https://slack/100', matchedBy: '#all_random', postedAt: now }
+    s.setNaggingSlackNewsCursor('channel:all_random', '100')
+    s.setNaggingSlackNewsCursor('channel:all_random', '99')
+    s.enqueueNaggingSlackNews(news)
+    s.enqueueNaggingSlackNews(news)
+
+    const restored = new StateStore(path)
+    expect(restored.getNaggingSlackNewsCursor('channel:all_random')).toBe('100')
+    expect(restored.naggingSlackNews(now)).toEqual([news])
+    restored.dismissNaggingSlackNews(news.id)
+    expect(new StateStore(path).naggingSlackNews(now)).toEqual([])
+    restored.enqueueNaggingSlackNews(news)
+    restored.clearNaggingSlackNews()
+    expect(new StateStore(path).naggingSlackNews(now)).toEqual([])
+  })
 })

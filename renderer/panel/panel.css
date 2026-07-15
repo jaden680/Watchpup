@@ -1400,6 +1400,14 @@ button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); 
 }
 .nagging-calendar-access { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--fg-faint); font-size: 11px; }
 .nagging-calendar-access button { padding: 6px 9px; font-size: 10.5px; }
+.nagging-slack-news {
+  display: grid; gap: 9px; padding: 11px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-sunken);
+}
+#settings-form .nagging-slack-news > .checkbox { font-size: 12px; font-weight: 700; }
+.nagging-slack-subscriptions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.nagging-slack-subscriptions textarea { min-height: 64px; resize: vertical; }
+.nagging-slack-news .hint { margin: 0; }
 .nagging-interval-row { display: flex; align-items: flex-end; gap: var(--sp-3); max-width: 360px; }
 .nagging-interval-row > label { flex: 1 1 0; }
 .nagging-range-mark { flex: 0 0 auto; padding-bottom: 9px; color: var(--fg-faint); }
@@ -1410,6 +1418,10 @@ button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); 
 .nagging-card.is-disabled #nagging-hint,
 .nagging-card.is-disabled .nagging-priorities,
 .nagging-card.is-disabled .nagging-calendar-access { opacity: 0.45; }
+.nagging-card.is-disabled .nagging-slack-news { opacity: 0.45; }
+@media (max-width: 760px) {
+  .nagging-slack-subscriptions { grid-template-columns: 1fr; }
+}
 
 /* 저장 바 (sticky) */
 .actions {

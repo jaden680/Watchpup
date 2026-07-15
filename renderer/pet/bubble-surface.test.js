@@ -65,4 +65,11 @@ describe('bubbleOpenTarget', () => {
   it('캘린더 권한 안내는 개인정보 설정을 연다', () => {
     expect(bubbleOpenTarget(null, null, null, false, true)).toEqual({ kind: 'calendar-privacy' })
   })
+
+  it('Slack 소식 잔소리는 원문 링크를 연다', () => {
+    expect(bubbleOpenTarget(null, null, null, false, false, 'https://workspace.slack.com/archives/C1/p1')).toEqual({
+      kind: 'external',
+      url: 'https://workspace.slack.com/archives/C1/p1',
+    })
+  })
 })

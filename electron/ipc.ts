@@ -110,6 +110,9 @@ export interface SettingsPatch {
   naggingEnabled?: boolean
   naggingMinMinutes?: number
   naggingMaxMinutes?: number
+  slackNewsEnabled?: boolean
+  slackNewsChannels?: string[]
+  slackNewsKeywords?: string[]
   petImageDir?: string
   petCodexDir?: string
   persona?: string

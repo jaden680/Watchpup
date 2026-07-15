@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { compareSlackTs } from '../slack/timestamp.js'
-import type { AgentNaggingPending } from '../presentation/nagging.js'
+import type { AgentNaggingPending, SlackNewsNaggingItem } from '../presentation/nagging.js'
 
 export interface WindowBounds {
   x?: number
@@ -30,6 +30,8 @@ export interface WatchpupState {
     lastTaskId?: string
     agent?: AgentNaggingPending
     calendarNotified?: Record<string, number>
+    slackNewsCursor?: Record<string, string>
+    slackNewsQueue?: SlackNewsNaggingItem[]
   }
 }
 
@@ -107,6 +109,50 @@ export class StateStore {
     for (const [eventKey, value] of Object.entries(notified)) {
       if (!Number.isFinite(value) || value < cutoff) delete notified[eventKey]
     }
+    this.persist()
+  }
+
+  getNaggingSlackNewsCursor(key: string): string | undefined {
+    return this.state.nagging?.slackNewsCursor?.[key]
+  }
+  setNaggingSlackNewsCursor(key: string, ts: string): void {
+    const cursors = ((this.state.nagging ??= {}).slackNewsCursor ??= {})
+    const current = cursors[key]
+    if (current && compareSlackTs(ts, current) <= 0) return
+    cursors[key] = ts
+    this.persist()
+  }
+  enqueueNaggingSlackNews(item: SlackNewsNaggingItem): void {
+    const queue = ((this.state.nagging ??= {}).slackNewsQueue ??= [])
+    if (queue.some((candidate) => candidate.id === item.id)) return
+    queue.push(item)
+    const cutoff = Date.now() - 48 * 60 * 60 * 1000
+    this.state.nagging!.slackNewsQueue = queue
+      .filter((candidate) => Number.isFinite(candidate.postedAt) && candidate.postedAt >= cutoff)
+      .slice(-30)
+    this.persist()
+  }
+  naggingSlackNews(now = Date.now()): SlackNewsNaggingItem[] {
+    const nagging = (this.state.nagging ??= {})
+    const before = nagging.slackNewsQueue ?? []
+    const cutoff = now - 48 * 60 * 60 * 1000
+    const queue = before.filter((candidate) => Number.isFinite(candidate.postedAt) && candidate.postedAt >= cutoff)
+    if (queue.length !== before.length) {
+      nagging.slackNewsQueue = queue
+      this.persist()
+    }
+    return structuredClone(queue)
+  }
+  dismissNaggingSlackNews(id: string): void {
+    const nagging = this.state.nagging
+    if (!nagging?.slackNewsQueue?.some((item) => item.id === id)) return
+    nagging.slackNewsQueue = nagging.slackNewsQueue.filter((item) => item.id !== id)
+    this.persist()
+  }
+  clearNaggingSlackNews(): void {
+    const nagging = this.state.nagging
+    if (!nagging?.slackNewsQueue?.length) return
+    nagging.slackNewsQueue = []
     this.persist()
   }
 

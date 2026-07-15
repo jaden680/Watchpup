@@ -22,6 +22,9 @@ import {
   nextNaggingDelayMs,
   pickCalendarNaggingEvent,
   pickNaggingWorkItem,
+  pickSlackNewsNagging,
+  slackNewsNaggingLine,
+  type SlackNewsNaggingItem,
 } from '../src/core/presentation/nagging.js'
 import { WatchpupGateway } from '../src/core/slack/gateway.js'
 import { generateQuips } from '../src/core/watchpup/quips.js'
@@ -568,6 +571,9 @@ async function main(): Promise<void> {
     broadcast('mentions.refresh', null)
     broadcastActivities()
   })
+  gateway.on('slack:news', (item: SlackNewsNaggingItem) => {
+    state.enqueueNaggingSlackNews(item)
+  })
 
   const agentBatchIds = new Set<string>()
   agentPoller = new LocalAgentPoller()
@@ -630,7 +636,7 @@ async function main(): Promise<void> {
     lastActivity = Date.now() // 다음 혼잣말까지 간격 확보
   }, 4 * 60 * 1000)
 
-  // 베타 `잔소리`: 캘린더 임박 일정 → 확인하지 않은 Agent 완료 → Work 순서로 상기한다.
+  // 베타 `잔소리`: 캘린더 임박 일정 → 확인하지 않은 Agent 완료 → Slack 소식/Work 순서로 상기한다.
   // 다음 예정 시각과 이미 알린 대상을 저장해 앱 재실행 뒤에도 중복 알림을 피한다.
   let naggingTimer: NodeJS.Timeout | null = null
   let priorityNaggingBusy = false
@@ -713,6 +719,14 @@ async function main(): Promise<void> {
       if (!configStore.get().naggingEnabled) return
       const previous = state.get().nagging?.lastTaskId ?? ''
       const item = pickNaggingWorkItem(items, state.workTouchedAt(), previous)
+      const news = current.slackNewsEnabled ? pickSlackNewsNagging(state.naggingSlackNews()) : null
+      const showNews = !!news && (!item || Math.random() < 0.45)
+      if (showNews && news) {
+        state.dismissNaggingSlackNews(news.id)
+        send(pet, EVT.bubble, { text: slackNewsNaggingLine(news), slackNewsUrl: news.permalink })
+        lastActivity = Date.now()
+        return
+      }
       if (item) state.setNagging({ lastTaskId: item.id })
       send(pet, EVT.bubble, { text: naggingLine(item), workItemId: item?.id })
       lastActivity = Date.now()
@@ -799,6 +813,9 @@ async function main(): Promise<void> {
   })
   ipcMain.handle(CMD.settingsSet, (_e, patch: SettingsPatch) => {
     const current = configStore.get()
+    const slackNewsChanged = ('slackNewsEnabled' in patch && patch.slackNewsEnabled !== current.slackNewsEnabled)
+      || ('slackNewsChannels' in patch && JSON.stringify(patch.slackNewsChannels) !== JSON.stringify(current.slackNewsChannels))
+      || ('slackNewsKeywords' in patch && JSON.stringify(patch.slackNewsKeywords) !== JSON.stringify(current.slackNewsKeywords))
     const merged = {
       ...patch,
       obsidian: { ...current.obsidian, ...(patch.obsidian ?? {}) },
@@ -816,9 +833,13 @@ async function main(): Promise<void> {
     send(pet, EVT.petImages, petImagesFromDir(c.petImageDir))
     send(pet, EVT.petCodex, resolveCodexPet(c.petCodexDir))
     if (pet && !pet.isDestroyed()) pet.setAlwaysOnTop(c.petAlwaysOnTop) // 즉시 반영
-    if ('naggingEnabled' in patch || 'naggingMinMinutes' in patch || 'naggingMaxMinutes' in patch) {
+    if ('naggingEnabled' in patch || 'naggingMinMinutes' in patch || 'naggingMaxMinutes' in patch || 'slackNewsEnabled' in patch) {
       scheduleNagging(true)
       if (c.naggingEnabled) void runPriorityNagging()
+    }
+    if ('naggingEnabled' in patch || 'slackNewsEnabled' in patch || 'slackNewsChannels' in patch || 'slackNewsKeywords' in patch) {
+      if (slackNewsChanged) state.clearNaggingSlackNews()
+      void gateway?.refreshSlackNews()
     }
   })
   // 토큰: 존재 여부만 조회 / 값 저장은 Keychain에만 (설정 변경은 재시작 후 반영)
@@ -883,8 +904,8 @@ async function main(): Promise<void> {
     if (id === 'jira') workStatus.resetJiraAuth()
   })
 
-  // 6) 감지원이 하나라도 붙었고 mySlackUserId가 있으면 기동
-  if (gateway.hasSource() && config.mySlackUserId) {
+  // 6) 일반 감지는 mySlackUserId, Slack 소식 구독은 User Token만 있어도 기동
+  if (gateway.hasSource() && (config.mySlackUserId || !!userToken)) {
     try {
       await gateway.start()
       // 예전 멘션의 채널 라벨(raw ID → DM/#채널) 일괄 갱신 후 열린 목록 새로고침
@@ -897,7 +918,7 @@ async function main(): Promise<void> {
   } else {
     const missing: string[] = []
     if (!gateway.hasSource()) missing.push('슬랙 연결(봇 토큰 또는 User Token)')
-    if (!config.mySlackUserId) missing.push('mySlackUserId')
+    if (!config.mySlackUserId && !userToken) missing.push('mySlackUserId')
     console.warn(`미설정 — Slack 감시 대기 중: ${missing.join(', ')}. 설정 탭에서 저장 후 앱 재시작.`)
   }
 }

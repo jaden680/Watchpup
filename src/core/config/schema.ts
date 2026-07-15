@@ -87,6 +87,10 @@ export const watchpupConfigSchema = z.object({
   naggingEnabled: z.boolean().default(false),
   naggingMinMinutes: z.number().int().min(1).max(120).default(5),
   naggingMaxMinutes: z.number().int().min(1).max(120).default(12),
+  // 구독한 Slack 채널·키워드의 새 루트 메시지를 무작위 잔소리에 섞는다.
+  slackNewsEnabled: z.boolean().default(false),
+  slackNewsChannels: z.array(z.string()).default(['all_전사공유', 'all_전사공지', 'all_random']),
+  slackNewsKeywords: z.array(z.string()).default([]),
   // Work 탭에서 사용할 Apple Reminders 목록. Watchpup이 자체적으로 선택을 저장한다.
   reminderListId: z.string().default(''),
   reminderListName: z.string().default(''),

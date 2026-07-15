@@ -137,6 +137,9 @@ const modelHint = document.getElementById('model-hint')
 const naggingEnabledInput = settingsForm.elements['naggingEnabled']
 const naggingMinInput = settingsForm.elements['naggingMinMinutes']
 const naggingMaxInput = settingsForm.elements['naggingMaxMinutes']
+const slackNewsEnabledInput = settingsForm.elements['slackNewsEnabled']
+const slackNewsChannelsInput = settingsForm.elements['slackNewsChannels']
+const slackNewsKeywordsInput = settingsForm.elements['slackNewsKeywords']
 const naggingCard = document.querySelector('.nagging-card')
 const naggingHint = document.getElementById('nagging-hint')
 const naggingCalendarSettings = document.getElementById('nagging-calendar-settings')
@@ -202,16 +205,24 @@ function naggingMinutes(input, fallback) {
   return Number.isFinite(value) ? Math.max(1, Math.min(120, value)) : fallback
 }
 
+function subscriptionList(value) {
+  return [...new Set(String(value || '').split(/[,\n]/).map((item) => item.trim()).filter(Boolean))]
+}
+
 function updateNaggingControls() {
   const enabled = !!naggingEnabledInput?.checked
   if (naggingMinInput) naggingMinInput.disabled = !enabled
   if (naggingMaxInput) naggingMaxInput.disabled = !enabled
+  if (slackNewsEnabledInput) slackNewsEnabledInput.disabled = !enabled
+  const slackNewsEnabled = enabled && !!slackNewsEnabledInput?.checked
+  if (slackNewsChannelsInput) slackNewsChannelsInput.disabled = !slackNewsEnabled
+  if (slackNewsKeywordsInput) slackNewsKeywordsInput.disabled = !slackNewsEnabled
   naggingCard?.classList.toggle('is-disabled', !enabled)
   const min = naggingMinutes(naggingMinInput, 5)
   const max = Math.max(min, naggingMinutes(naggingMaxInput, 12))
   if (naggingHint) {
     naggingHint.textContent = enabled
-      ? `캘린더·Agent 타이밍을 먼저 알리고, 그 외에는 ${min}~${max}분 사이에 미완료 작업을 다시 꺼냅니다.`
+      ? `캘린더·Agent 타이밍을 먼저 알리고, 그 외에는 ${min}~${max}분 사이에 Work${slackNewsEnabled ? '와 Slack 새 소식' : ''}을 다시 꺼냅니다.`
       : '현재 꺼져 있어요. 활성화해야 잔소리가 시작됩니다.'
   }
 }
@@ -223,6 +234,7 @@ if (showActivityHudInput) showActivityHudInput.addEventListener('change', update
 if (naggingEnabledInput) naggingEnabledInput.addEventListener('change', updateNaggingControls)
 if (naggingMinInput) naggingMinInput.addEventListener('input', updateNaggingControls)
 if (naggingMaxInput) naggingMaxInput.addEventListener('input', updateNaggingControls)
+if (slackNewsEnabledInput) slackNewsEnabledInput.addEventListener('change', updateNaggingControls)
 if (naggingCalendarSettings) naggingCalendarSettings.addEventListener('click', () => window.watchpup.openCalendarPrivacy())
 
 async function loadSettings() {
@@ -239,6 +251,9 @@ async function loadSettings() {
   if (naggingEnabledInput) naggingEnabledInput.checked = cfg.naggingEnabled === true
   if (naggingMinInput) naggingMinInput.value = String(cfg.naggingMinMinutes ?? 5)
   if (naggingMaxInput) naggingMaxInput.value = String(cfg.naggingMaxMinutes ?? 12)
+  if (slackNewsEnabledInput) slackNewsEnabledInput.checked = cfg.slackNewsEnabled === true
+  if (slackNewsChannelsInput) slackNewsChannelsInput.value = (cfg.slackNewsChannels || ['all_전사공유', 'all_전사공지', 'all_random']).join(', ')
+  if (slackNewsKeywordsInput) slackNewsKeywordsInput.value = (cfg.slackNewsKeywords || []).join(', ')
   updatePetSizeLabel()
   updateBubbleSizeLabel()
   updateHudSizeLabel()
@@ -630,6 +645,9 @@ settingsForm.addEventListener('submit', async (e) => {
     naggingEnabled: naggingEnabledInput ? naggingEnabledInput.checked : false,
     naggingMinMinutes: naggingMinutes(naggingMinInput, 5),
     naggingMaxMinutes: Math.max(naggingMinutes(naggingMinInput, 5), naggingMinutes(naggingMaxInput, 12)),
+    slackNewsEnabled: slackNewsEnabledInput ? slackNewsEnabledInput.checked : false,
+    slackNewsChannels: subscriptionList(slackNewsChannelsInput?.value),
+    slackNewsKeywords: subscriptionList(slackNewsKeywordsInput?.value),
     persona: settingsForm.elements['persona'] ? settingsForm.elements['persona'].value.trim() : '',
     bubbleStyle: settingsForm.elements['bubbleStyle'] ? settingsForm.elements['bubbleStyle'].value : 'status',
     enableBot: settingsForm.elements['enableBot'].checked,

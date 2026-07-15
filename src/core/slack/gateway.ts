@@ -27,6 +27,7 @@ import { ThreadFollowPoller } from './thread-poller.js'
 import { decideIngest } from './ingest-filter.js'
 import { compareSlackTs, latestSlackTs } from './timestamp.js'
 import { parseSlackThreadPermalink } from './permalink.js'
+import { SlackNewsPoller } from './news-poller.js'
 import { threadText as buildThreadText, actionContext, devContext, devTitle } from '../watchpup/mention-context.js'
 
 export interface GatewayDeps {
@@ -58,6 +59,7 @@ export class WatchpupGateway extends EventEmitter {
   private userClient: WebClient | null = null
   private poller: SearchPoller | null = null
   private followPoller: ThreadFollowPoller | null = null
+  private newsPoller: SlackNewsPoller | null = null
   private pendingThreadImports = new Map<string, string>()
   /** 내가 속한 유저그룹 ID/핸들(@team) — attachUserSearch에서 usergroups.list로 채워짐(usergroups:read 필요) */
   private myGroupIds: string[] = []
@@ -107,6 +109,24 @@ export class WatchpupGateway extends EventEmitter {
   attachUserToken(userToken: string): void {
     this.userClient = new WebClient(userToken)
     this.attachFollowPoller(this.userClient, this.cfg().mySlackUserId, this.cfg().searchIntervalSec)
+    this.attachNewsPoller(this.userClient, this.cfg().searchIntervalSec)
+  }
+
+  private attachNewsPoller(client: WebClient, intervalSec: number): void {
+    if (this.newsPoller) return
+    this.newsPoller = new SlackNewsPoller(
+      client,
+      intervalSec,
+      () => ({
+        enabled: this.cfg().naggingEnabled && this.cfg().slackNewsEnabled,
+        channels: this.cfg().slackNewsChannels,
+        keywords: this.cfg().slackNewsKeywords,
+        myUserId: this.cfg().mySlackUserId,
+      }),
+      (key) => this.deps.state.getNaggingSlackNewsCursor(key),
+      (key, ts) => this.deps.state.setNaggingSlackNewsCursor(key, ts),
+      (candidate) => { this.emit('slack:news', candidate) },
+    )
   }
 
   private attachFollowPoller(client: WebClient, myUserId: string, intervalSec: number): void {
@@ -709,7 +729,11 @@ export class WatchpupGateway extends EventEmitter {
 
   /** 부착된 소스가 하나라도 있으면 true */
   hasSource(): boolean {
-    return !!this.app || !!this.poller || !!this.followPoller
+    return !!this.app || !!this.poller || !!this.followPoller || !!this.newsPoller
+  }
+
+  async refreshSlackNews(): Promise<void> {
+    await this.newsPoller?.pollNow()
   }
 
   async start(): Promise<void> {
@@ -723,12 +747,16 @@ export class WatchpupGateway extends EventEmitter {
     if (this.followPoller) {
       this.followPoller.start()
     }
+    if (this.newsPoller) {
+      this.newsPoller.start()
+    }
     if (!this.hasSource()) logger.warn('감지원 없음 — 봇/검색 소스가 부착되지 않았습니다')
   }
 
   async stop(): Promise<void> {
     if (this.poller) this.poller.stop()
     if (this.followPoller) this.followPoller.stop()
+    if (this.newsPoller) this.newsPoller.stop()
     if (this.app) await this.app.stop()
   }
 }

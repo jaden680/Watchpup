@@ -8,6 +8,8 @@ import {
   nextNaggingDelayMs,
   pickCalendarNaggingEvent,
   pickNaggingWorkItem,
+  pickSlackNewsNagging,
+  slackNewsNaggingLine,
 } from './nagging.js'
 import type { WorkItem } from '../work/types.js'
 import type { ActivitySession } from '../types.js'
@@ -50,5 +52,15 @@ describe('nagging presentation', () => {
     expect(pickCalendarNaggingEvent([event], {}, now)).toEqual(event)
     expect(pickCalendarNaggingEvent([event], { [calendarEventKey(event)]: now }, now)).toBeNull()
     expect(calendarNaggingLine(event, now)).toBe('5분 뒤 “데일리” 일정이에요. 이제 스케줄 갈 준비~!')
+  })
+
+  it('대기 중인 Slack 소식을 무작위로 고르고 한 줄 말풍선으로 만든다', () => {
+    const news = [
+      { id: 'C1:1', channel: 'C1', channelName: 'all_random', messageTs: '1', text: '첫 소식', permalink: 'https://slack/1', matchedBy: '#all_random', postedAt: 1_000 },
+      { id: 'C1:2', channel: 'C1', channelName: 'all_전사공지', messageTs: '2', text: '두 번째\n소식', permalink: 'https://slack/2', matchedBy: '#all_전사공지', postedAt: 2_000 },
+    ]
+    const picked = pickSlackNewsNagging(news, () => 0.9)
+    expect(picked?.id).toBe('C1:2')
+    expect(slackNewsNaggingLine(picked!)).toBe('#all_전사공지 새 소식! 두 번째 소식 · 보러갈래?')
   })
 })
