@@ -42,3 +42,36 @@ final result: passed
 - regression: HUD의 2줄 메시지 요약 및 말풍선 크기 60~140% 설정은 기존 동작 유지
 
 final result: passed
+
+## Work layout design QA
+
+- Source visual truth: user-provided Work list screenshot (kept local and excluded from Git)
+- Implementation capture: local Electron screenshot (kept local and excluded from Git)
+- Comparison capture: local side-by-side QA image (kept local and excluded from Git)
+- Viewport: 1453 × 768, macOS Electron app
+- State: Work tab with a generic active reminder selected
+
+## Intentional layout changes
+
+- Removed the large, expandable title and memo form above the task list.
+- Consolidated link type, sort, and completion filters into one compact row.
+- Expanded the task list column from 32% to 38% and increased its maximum width.
+- Added an always-visible, title-only composer below the scrollable task list.
+- Kept memo creation and editing in the selected task's detail pane.
+
+## Fidelity and interaction checks
+
+- Typography, colors, borders, and corner radii continue to use the existing Work design tokens.
+- The list uses the reclaimed vertical space and scrolls independently above the fixed composer.
+- The composer exposes only `새 작업 제목` and `추가`; it does not expose a memo field.
+- An item without a memo exposes `메모 추가` in the detail pane.
+- Existing Reminder list, search, filtering, sorting, refresh, and external-open controls remain available.
+- Accessibility inspection confirms the composer follows the task list in document order.
+
+## Findings
+
+- P0: none
+- P1: none
+- P2: none
+
+final result: passed

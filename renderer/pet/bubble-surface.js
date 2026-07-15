@@ -18,3 +18,13 @@ export function hudFoldContent({ activityCount, folded }) {
     actionLabel: folded ? '펼치기' : '접기',
   }
 }
+
+export function bubbleOpenTarget(mentionId, workItemId, activityId, calendarEvent, calendarPrivacy, slackNewsUrl) {
+  if (mentionId) return { kind: 'mention', id: mentionId }
+  if (workItemId) return { kind: 'work', id: workItemId }
+  if (activityId) return { kind: 'activity', id: activityId }
+  if (slackNewsUrl) return { kind: 'external', url: slackNewsUrl }
+  if (calendarPrivacy) return { kind: 'calendar-privacy' }
+  if (calendarEvent) return { kind: 'calendar' }
+  return { kind: 'panel' }
+}
