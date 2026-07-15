@@ -33,6 +33,7 @@ import { ReminderGateway } from './reminders.js'
 import { WorkStatusService } from './work-status.js'
 import { focusVisiblePanel, setPanelSwitcherVisibility } from './panel-activation.js'
 import { ClaudeModelCatalogService } from '../src/core/agent/model-catalog.js'
+import { ensureOpenAtLogin } from './login-item.js'
 
 let pet: BrowserWindow | null = null
 let panel: BrowserWindow | null = null
@@ -746,7 +747,10 @@ async function main(): Promise<void> {
   }
 }
 
-app.whenReady().then(main)
+app.whenReady().then(() => {
+  ensureOpenAtLogin(app)
+  return main()
+})
 app.on('window-all-closed', () => {
   /* 트레이 상주: macOS에서 유지 */
 })
