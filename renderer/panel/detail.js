@@ -69,6 +69,117 @@ function renderDetail(m) {
     reBtn.textContent = '분석 중…'
     window.watchpup.reanalyze(m.id).catch((e) => console.error('reanalyze 실패', e))
   })
+  const rightWrap = document.createElement('div')
+  rightWrap.className = 'head-right'
+  rightWrap.append(reBtn, dref, pill)
+  row.append(where, rightWrap)
+  head.append(row)
+
+  // 카테고리 선택(수동 이동/수정)
+  const catRow = document.createElement('div')
+  catRow.className = 'cat-row'
+  const catLabel = document.createElement('span')
+  catLabel.className = 'cat-row-label'
+  catLabel.textContent = '성격'
+  const catSel = document.createElement('select')
+  catSel.className = 'cat-select'
+  const optNone = document.createElement('option')
+  optNone.value = ''
+  optNone.textContent = '미분류'
+  catSel.appendChild(optNone)
+  for (const key of CAT_ORDER) {
+    const o = document.createElement('option')
+    o.value = key
+    o.textContent = CAT_LABEL[key]
+    catSel.appendChild(o)
+  }
+  catSel.value = (m.analysis && m.analysis.category) || ''
+  catSel.addEventListener('change', () => {
+    if (m.analysis) m.analysis.category = catSel.value || undefined
+    window.watchpup.setCategory(m.id, catSel.value).catch((e) => console.error('setCategory 실패', e))
+  })
+  catRow.append(catLabel, catSel)
+  head.append(catRow)
+
+  const readState = document.createElement('div')
+  readState.className = 'read-state'
+  if (m.readAt) {
+    const d = new Date(m.readAt)
+    const isToday = d.toDateString() === new Date().toDateString()
+    const timeStr = isToday
+      ? d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleString('ko-KR')
+    readState.textContent = `확인함 · ${timeStr}`
+  } else {
+    readState.textContent = '안 읽음'
+  }
+  head.append(readState)
+  const linkRow = document.createElement('div')
+  linkRow.className = 'permalink-row'
+  if (m.permalink) {
+    const link = document.createElement('a')
+    link.className = 'permalink'
+    link.href = '#'
+    link.textContent = '↗ Slack에서 열기'
+    link.addEventListener('click', (e) => {
+      e.preventDefault()
+      window.watchpup.openExternal(m.permalink)
+    })
+    linkRow.append(link)
+  }
+  const copyMsgBtn = document.createElement('a')
+  copyMsgBtn.className = 'permalink'
+  copyMsgBtn.href = '#'
+  copyMsgBtn.textContent = '링크 복사하기'
+  if (!m.permalink) copyMsgBtn.classList.add('disabled')
+  copyMsgBtn.addEventListener('click', async (e) => {
+    e.preventDefault()
+    if (!m.permalink) return
+    await copyToClipboard(m.permalink)
+    const original = copyMsgBtn.textContent
+    copyMsgBtn.textContent = '복사됨'
+    setTimeout(() => {
+      if (copyMsgBtn.textContent === '복사됨') copyMsgBtn.textContent = original
+    }, 1500)
+  })
+  linkRow.append(copyMsgBtn)
+  head.append(linkRow)
+  detailEl.appendChild(head)
+
+  // 미리알림 컨트롤 — analysis 유무와 무관하게 항상 표시(헤더와 2-pane 사이, full-width)
+  detailEl.appendChild(renderReminderSection(m))
+
+  // 두 개의 패널: 좌측 = 슬랙식 스레드 대화, 우측 = watchpup 코파일럿(요약/조언/할일/답장/액션/대화)
+  const panes = document.createElement('div')
+  panes.className = 'detail-2pane'
+  const left = renderThreadPane(m)
+  const right = renderWatchpupPane(m)
+  const divider = document.createElement('div')
+  divider.className = 'pane-divider'
+  divider.title = '드래그해서 좌우 비율 조절'
+  panes.append(left, divider, right)
+  detailEl.appendChild(panes)
+  attachSplitter(panes, left, right, divider)
+}
+
+// "미리알림으로 저장하기" 섹션 — 헤더에 있던 미리알림 관련 컨트롤을 모아 하나의 섹션으로 분리.
+// 버튼/핸들러는 기존과 동일(위치만 이동): 빠른 추가(mentionToWork) / 프롬프트로 생성(mentionToWorkAI,
+// aiPromptRow 인라인 토글) / TODO로 이동(mentionReminderLink→openWorkItem) + 마감일(선택) 입력.
+function renderReminderSection(m) {
+  const wrap = document.createElement('div')
+  wrap.className = 'section reminder-section'
+  const h = document.createElement('h3')
+  h.textContent = '미리알림으로 저장하기'
+  wrap.appendChild(h)
+
+  const body = document.createElement('div')
+  body.className = 'reminder-body'
+
+  const dueRow = document.createElement('div')
+  dueRow.className = 'reminder-due-row'
+  const dueLabel = document.createElement('label')
+  dueLabel.className = 'reminder-due-label'
+  dueLabel.textContent = '마감일(선택)'
   const dueInput = document.createElement('input')
   dueInput.type = 'datetime-local'
   dueInput.className = 'due-input'
@@ -78,6 +189,11 @@ function renderDetail(m) {
     const ms = new Date(dueInput.value).getTime()
     return Number.isFinite(ms) ? ms : undefined
   }
+  dueLabel.appendChild(dueInput)
+  dueRow.append(dueLabel)
+
+  const btnRow = document.createElement('div')
+  btnRow.className = 'reminder-btn-row'
 
   const workBtn = document.createElement('button')
   workBtn.type = 'button'
@@ -164,94 +280,10 @@ function renderDetail(m) {
     goToWorkBtn.addEventListener('click', () => window.watchpup.openWorkItem(reminderId))
   }).catch((e) => console.error('mentionReminderLink 실패', e))
 
-  const rightWrap = document.createElement('div')
-  rightWrap.className = 'head-right'
-  rightWrap.append(reBtn, dueInput, workBtn, aiBtn, goToWorkBtn, dref, pill)
-  row.append(where, rightWrap)
-  head.append(row, aiPromptRow)
-
-  // 카테고리 선택(수동 이동/수정)
-  const catRow = document.createElement('div')
-  catRow.className = 'cat-row'
-  const catLabel = document.createElement('span')
-  catLabel.className = 'cat-row-label'
-  catLabel.textContent = '성격'
-  const catSel = document.createElement('select')
-  catSel.className = 'cat-select'
-  const optNone = document.createElement('option')
-  optNone.value = ''
-  optNone.textContent = '미분류'
-  catSel.appendChild(optNone)
-  for (const key of CAT_ORDER) {
-    const o = document.createElement('option')
-    o.value = key
-    o.textContent = CAT_LABEL[key]
-    catSel.appendChild(o)
-  }
-  catSel.value = (m.analysis && m.analysis.category) || ''
-  catSel.addEventListener('change', () => {
-    if (m.analysis) m.analysis.category = catSel.value || undefined
-    window.watchpup.setCategory(m.id, catSel.value).catch((e) => console.error('setCategory 실패', e))
-  })
-  catRow.append(catLabel, catSel)
-  head.append(catRow)
-
-  const readState = document.createElement('div')
-  readState.className = 'read-state'
-  if (m.readAt) {
-    const d = new Date(m.readAt)
-    const isToday = d.toDateString() === new Date().toDateString()
-    const timeStr = isToday
-      ? d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-      : d.toLocaleString('ko-KR')
-    readState.textContent = `확인함 · ${timeStr}`
-  } else {
-    readState.textContent = '안 읽음'
-  }
-  head.append(readState)
-  const linkRow = document.createElement('div')
-  linkRow.className = 'permalink-row'
-  if (m.permalink) {
-    const link = document.createElement('a')
-    link.className = 'permalink'
-    link.href = '#'
-    link.textContent = '↗ Slack에서 열기'
-    link.addEventListener('click', (e) => {
-      e.preventDefault()
-      window.watchpup.openExternal(m.permalink)
-    })
-    linkRow.append(link)
-  }
-  const copyMsgBtn = document.createElement('a')
-  copyMsgBtn.className = 'permalink'
-  copyMsgBtn.href = '#'
-  copyMsgBtn.textContent = '링크 복사하기'
-  if (!m.permalink) copyMsgBtn.classList.add('disabled')
-  copyMsgBtn.addEventListener('click', async (e) => {
-    e.preventDefault()
-    if (!m.permalink) return
-    await copyToClipboard(m.permalink)
-    const original = copyMsgBtn.textContent
-    copyMsgBtn.textContent = '복사됨'
-    setTimeout(() => {
-      if (copyMsgBtn.textContent === '복사됨') copyMsgBtn.textContent = original
-    }, 1500)
-  })
-  linkRow.append(copyMsgBtn)
-  head.append(linkRow)
-  detailEl.appendChild(head)
-
-  // 두 개의 패널: 좌측 = 슬랙식 스레드 대화, 우측 = watchpup 코파일럿(요약/조언/할일/답장/액션/대화)
-  const panes = document.createElement('div')
-  panes.className = 'detail-2pane'
-  const left = renderThreadPane(m)
-  const right = renderWatchpupPane(m)
-  const divider = document.createElement('div')
-  divider.className = 'pane-divider'
-  divider.title = '드래그해서 좌우 비율 조절'
-  panes.append(left, divider, right)
-  detailEl.appendChild(panes)
-  attachSplitter(panes, left, right, divider)
+  btnRow.append(workBtn, aiBtn, goToWorkBtn)
+  body.append(btnRow, dueRow, aiPromptRow)
+  wrap.append(body)
+  return wrap
 }
 
 function renderActivityDetail(activity, targetEl = detailEl) {

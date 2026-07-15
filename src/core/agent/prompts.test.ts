@@ -52,4 +52,16 @@ describe('reminderPrompt', () => {
     expect(p).toContain('"dueDate"')
     expect(p).toContain('null')
   })
+
+  it('now가 없으면 오늘 날짜/연도 변환 지시를 넣지 않는다', () => {
+    const p = reminderPrompt({ threadText: 't', authorName: 'a' })
+    expect(p).not.toContain('오늘 날짜')
+  })
+
+  it('now가 있으면 오늘 날짜와 연도 변환 지시를 포함한다', () => {
+    const p = reminderPrompt({ threadText: 't', authorName: 'a', now: '2026-07-15 (화)' })
+    expect(p).toContain('오늘 날짜: 2026-07-15 (화)')
+    expect(p).toContain('연도')
+    expect(p).toContain('YYYY-MM-DD')
+  })
 })

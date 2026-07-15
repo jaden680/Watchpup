@@ -102,6 +102,16 @@ export async function analyzeMention(
   }
 }
 
+const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토']
+
+/** 오늘 날짜를 "YYYY-MM-DD (요일)" 형태로 — reminderPrompt에 now로 전달해 LLM이 연도/상대 날짜를 정확히 환산하게 함. */
+function todayKoreanString(d: Date = new Date()): string {
+  const y = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const da = String(d.getDate()).padStart(2, '0')
+  return `${y}-${mo}-${da} (${WEEKDAY_KO[d.getDay()]})`
+}
+
 /**
  * 스레드 내용 기반 미리알림(Reminder) 초안 생성. 저장된 스레드(threadText)만 사용(재조회 없음).
  * 세션 재사용 없이 단발 호출 — 스레드 텍스트를 프롬프트에 직접 담아 보내므로 resume이 불필요.
@@ -121,6 +131,7 @@ export async function generateReminderDraft(
       authorName: mention.authorName ?? mention.authorId,
       channelName: mention.channelName,
       extra,
+      now: todayKoreanString(),
     }),
     config,
     agents: {},
