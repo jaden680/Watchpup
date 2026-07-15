@@ -27,11 +27,25 @@ enum HelperError: LocalizedError {
 @main
 struct WatchpupRemindersHelper {
     static func main() async {
+        var arguments = Array(CommandLine.arguments.dropFirst())
+        var outputPath: String?
+        if let outputIndex = arguments.firstIndex(of: "--output"), arguments.indices.contains(outputIndex + 1) {
+            outputPath = arguments[outputIndex + 1]
+            arguments.removeSubrange(outputIndex...(outputIndex + 1))
+        }
         do {
-            let output = try await run(arguments: Array(CommandLine.arguments.dropFirst()))
-            try writeJSON(output)
+            let output = try await run(arguments: arguments)
+            if let outputPath {
+                try writeJSON(["ok": true, "value": output], to: outputPath)
+            } else {
+                try writeJSON(output)
+            }
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            if let outputPath {
+                try? writeJSON(["ok": false, "error": message], to: outputPath)
+                Foundation.exit(0)
+            }
             FileHandle.standardError.write(Data((message + "\n").utf8))
             Foundation.exit(1)
         }
@@ -278,5 +292,10 @@ struct WatchpupRemindersHelper {
         let data = try JSONSerialization.data(withJSONObject: value, options: [])
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data("\n".utf8))
+    }
+
+    private static func writeJSON(_ value: Any, to path: String) throws {
+        let data = try JSONSerialization.data(withJSONObject: value, options: [])
+        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 }

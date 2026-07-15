@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { parseWorkLinks } from '../src/core/work/links.js'
@@ -10,6 +11,7 @@ const execFileAsync = promisify(execFile)
 
 export type ReminderCommand = 'lists' | 'tasks' | 'create' | 'add-subtask' | 'update-title' | 'update-user-note' | 'set-completed' | 'append-link' | 'upcoming-events'
 export type ReminderCommandRunner = (command: ReminderCommand, args: string[]) => Promise<string>
+export type CalendarCommandRunner = (command: 'upcoming-events', args: string[]) => Promise<string>
 
 function resolveHelperPath(): string {
   const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
@@ -21,6 +23,18 @@ function resolveHelperPath(): string {
   ].filter((candidate): candidate is string => Boolean(candidate))
   const helper = candidates.find((candidate) => existsSync(candidate))
   if (!helper) throw new Error('Watchpup Reminders helper를 찾지 못했습니다. npm run build:app을 실행해주세요.')
+  return helper
+}
+
+function resolveCalendarHelperAppPath(): string {
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+  const candidates = [
+    process.env.WATCHPUP_CALENDAR_HELPER_APP,
+    resourcesPath ? join(resourcesPath, 'Watchpup.app') : '',
+    join(process.cwd(), 'dist', 'native', 'Watchpup.app'),
+  ].filter((candidate): candidate is string => Boolean(candidate))
+  const helper = candidates.find((candidate) => existsSync(candidate))
+  if (!helper) throw new Error('Watchpup Calendar helper 앱을 찾지 못했습니다. npm run build:app을 실행해주세요.')
   return helper
 }
 
@@ -39,6 +53,24 @@ const defaultRunner: ReminderCommandRunner = async (command, args) => {
   }
 }
 
+const defaultCalendarRunner: CalendarCommandRunner = async (command, args) => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'watchpup-calendar-'))
+  const outputPath = join(tempDir, 'result.json')
+  try {
+    await execFileAsync('/usr/bin/open', [
+      '-W', '-n', '-a', resolveCalendarHelperAppPath(),
+      '--args', '--output', outputPath, command, ...args,
+    ], { timeout: 45_000 })
+    const result = JSON.parse(readFileSync(outputPath, 'utf8')) as { ok?: unknown; value?: unknown; error?: unknown }
+    if (result.ok !== true) throw new Error(typeof result.error === 'string' ? result.error : '캘린더 helper 실행에 실패했습니다.')
+    return JSON.stringify(result.value ?? [])
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : '캘린더 helper 실행에 실패했습니다.')
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+}
+
 function dateMs(value: unknown): number | undefined {
   if (typeof value !== 'string' || !value) return undefined
   const parsed = Date.parse(value)
@@ -46,7 +78,10 @@ function dateMs(value: unknown): number | undefined {
 }
 
 export class ReminderGateway {
-  constructor(private readonly runCommand: ReminderCommandRunner = defaultRunner) {}
+  constructor(
+    private readonly runCommand: ReminderCommandRunner = defaultRunner,
+    private readonly runCalendarCommand: CalendarCommandRunner = defaultCalendarRunner,
+  ) {}
 
   async lists(): Promise<ReminderListRef[]> {
     const raw = await this.runCommand('lists', [])
@@ -55,7 +90,7 @@ export class ReminderGateway {
   }
 
   async upcomingEvents(startAt: number, endAt: number): Promise<NaggingCalendarEvent[]> {
-    const raw = await this.runCommand('upcoming-events', [String(startAt), String(endAt)])
+    const raw = await this.runCalendarCommand('upcoming-events', [String(startAt), String(endAt)])
     const rows = JSON.parse(raw || '[]') as Array<Record<string, unknown>>
     return rows
       .map((row) => ({

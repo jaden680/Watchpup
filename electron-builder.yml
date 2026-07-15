@@ -9,6 +9,8 @@ files:
 extraResources:
   - from: dist/native/watchpup-reminders
     to: watchpup-reminders
+  - from: dist/native/Watchpup.app
+    to: Watchpup.app
 mac:
   extendInfo:
     NSRemindersFullAccessUsageDescription: Watchpup에서 선택한 미리 알림 목록과 업무 링크를 표시하고 관리합니다.

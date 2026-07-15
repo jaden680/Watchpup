@@ -40,7 +40,7 @@ describe('ReminderGateway', () => {
       { id: 'E2', title: '두 번째', startAt: '2026-07-15T03:10:00.000Z', endAt: '2026-07-15T03:40:00.000Z', calendarName: 'Work' },
       { id: 'E1', title: '첫 번째', startAt: '2026-07-15T03:05:00.000Z', endAt: '2026-07-15T03:35:00.000Z', calendarName: 'Work', location: 'Zoom' },
     ]))
-    const gateway = new ReminderGateway(runner)
+    const gateway = new ReminderGateway(runner, runner)
     const events = await gateway.upcomingEvents(1000, 2000)
     expect(events.map((event) => event.id)).toEqual(['E1', 'E2'])
     expect(events[0]).toMatchObject({ title: '첫 번째', location: 'Zoom', startAt: Date.parse('2026-07-15T03:05:00.000Z') })
