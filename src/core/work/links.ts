@@ -6,7 +6,6 @@ const PLAIN_LINK = /https?:\/\/[^\s<>()]+/gi
 function trimTrailingPunctuation(value: string): string {
   return value.replace(/[.,;:!?\]}]+$/g, '')
 }
-
 export function classifyWorkLink(value: string, label = ''): WorkLinkKind {
   let url: URL
   try {
@@ -94,4 +93,3 @@ export function parseGithubLink(value: string): { owner: string; repo: string; n
     return null
   }
 }
-

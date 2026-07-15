@@ -19,4 +19,3 @@ describe('work links', () => {
     expect(classifyWorkLink('https://example.com', 'Notion 문서')).toBe('notion')
   })
 })
-
