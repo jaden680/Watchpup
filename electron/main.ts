@@ -55,6 +55,7 @@ import { WorkStatusService } from './work-status.js'
 import { focusVisiblePanel, setPanelSwitcherVisibility } from './panel-activation.js'
 import { ClaudeModelCatalogService } from '../src/core/agent/model-catalog.js'
 import { ensureOpenAtLogin } from './login-item.js'
+import { openExternalLink } from './external-link.js'
 import { GithubPrNotificationPoller, githubPrNaggingLine } from '../src/core/github/notifications.js'
 import { BuildCompletionPoller, buildCompletionLine, type BuildTool } from '../src/core/build/completion-poller.js'
 import { startupSlackSecrets } from '../src/core/startup/access.js'
@@ -111,6 +112,17 @@ async function main(): Promise<void> {
   const reminders = new ReminderGateway()
   const workStatus = new WorkStatusService(configStore, keychain)
   const modelCatalog = new ClaudeModelCatalogService(join(config.dataDir, 'claude-models.json'))
+  const openExternalUrl = (url: string): void => {
+    void openExternalLink(url, {
+      openExternal: (target) => shell.openExternal(target),
+      openWithBundle: (bundleId, target) => new Promise<void>((resolve, reject) => {
+        execFile('/usr/bin/open', ['-b', bundleId, target], (error) => {
+          if (error) reject(error)
+          else resolve()
+        })
+      }),
+    }).catch((error) => logger.warn('외부 링크 열기 실패', { url, error: String(error) }))
+  }
   let calendarAccessStatus: CalendarAuthorizationStatus | null = null
   githubPrPoller = new GithubPrNotificationPoller(
     () => {
@@ -396,10 +408,10 @@ async function main(): Promise<void> {
     if (!target) return
     acknowledgeAgentNagging()
     if (target.kind === 'external') {
-      void shell.openExternal(target.url)
+      openExternalUrl(target.url)
     } else {
       const mention = mentions.get(target.id)
-      if (mention?.permalink) void shell.openExternal(mention.permalink)
+      if (mention?.permalink) openExternalUrl(mention.permalink)
       else openMentionPanel(target.id)
     }
   })
@@ -420,9 +432,9 @@ async function main(): Promise<void> {
     const bundleId = tool === 'xcode' ? 'com.apple.dt.Xcode' : tool === 'android' ? 'com.google.android.studio' : ''
     if (bundleId) execFile('/usr/bin/open', ['-b', bundleId], () => {})
   })
-  // permalink 등 외부 링크는 기본 브라우저로 (창 네비게이션 방지)
+  // Slack permalink는 데스크톱 앱으로, 나머지는 기본 외부 앱으로 연다(창 네비게이션 방지).
   ipcMain.on('open.external', (_e, url: string) => {
-    if (typeof url === 'string' && /^https?:\/\//.test(url)) void shell.openExternal(url)
+    if (typeof url === 'string' && /^https?:\/\//.test(url)) openExternalUrl(url)
   })
 
   // 맥 스타일 창 컨트롤 (프레임리스 → 커스텀 신호등)
