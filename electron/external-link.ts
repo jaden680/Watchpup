@@ -1,10 +1,8 @@
 import { parseSlackThreadPermalink } from '../src/core/slack/permalink.js'
 
-export const SLACK_MAC_BUNDLE_ID = 'com.tinyspeck.slackmacgap'
-
 export interface ExternalLinkDeps {
   openExternal(url: string): Promise<unknown>
-  openWithBundle(bundleId: string, url: string): Promise<unknown>
+  resolveSlackTeamId(): Promise<string | null>
 }
 
 export function isSlackMessagePermalink(url: string): boolean {
@@ -16,18 +14,32 @@ export function isSlackMessagePermalink(url: string): boolean {
   }
 }
 
-/** Slack 메시지는 데스크톱 앱으로 바로 열고, 앱을 찾지 못하면 기본 브라우저로 되돌린다. */
+export function slackMessageDeepLink(permalink: string, teamId: string): string {
+  const target = parseSlackThreadPermalink(permalink)
+  const params = new URLSearchParams({
+    team: teamId,
+    id: target.channel,
+    message: target.messageTs.replace('.', ''),
+    thread_ts: target.threadTs,
+  })
+  return `slack://channel?${params.toString()}`
+}
+
+/** Slack 메시지는 native deep link로 열고, 필요한 정보나 앱이 없으면 permalink로 되돌린다. */
 export async function openExternalLink(
   url: string,
   deps: ExternalLinkDeps,
   platform = process.platform,
-): Promise<'slack-app' | 'external'> {
+): Promise<'slack-message' | 'external'> {
   if (platform === 'darwin' && isSlackMessagePermalink(url)) {
-    try {
-      await deps.openWithBundle(SLACK_MAC_BUNDLE_ID, url)
-      return 'slack-app'
-    } catch {
-      // Slack 미설치 등 LaunchServices 실패 시 기존 브라우저 동작을 유지한다.
+    const teamId = await deps.resolveSlackTeamId()
+    if (teamId) {
+      try {
+        await deps.openExternal(slackMessageDeepLink(url, teamId))
+        return 'slack-message'
+      } catch {
+        // Slack 미설치 등 custom protocol 실패 시 정확한 메시지를 여는 permalink를 유지한다.
+      }
     }
   }
 

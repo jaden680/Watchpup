@@ -115,12 +115,10 @@ async function main(): Promise<void> {
   const openExternalUrl = (url: string): void => {
     void openExternalLink(url, {
       openExternal: (target) => shell.openExternal(target),
-      openWithBundle: (bundleId, target) => new Promise<void>((resolve, reject) => {
-        execFile('/usr/bin/open', ['-b', bundleId, target], (error) => {
-          if (error) reject(error)
-          else resolve()
-        })
-      }),
+      resolveSlackTeamId: async () => {
+        await ensureSlackUserToken()
+        return gateway?.resolveTeamId() ?? null
+      },
     }).catch((error) => logger.warn('외부 링크 열기 실패', { url, error: String(error) }))
   }
   let calendarAccessStatus: CalendarAuthorizationStatus | null = null

@@ -60,6 +60,19 @@ describe('WatchpupGateway.setReaction', () => {
   })
 })
 
+describe('WatchpupGateway.resolveTeamId', () => {
+  it('auth.test의 workspace ID를 캐시한다', async () => {
+    const { gw } = make()
+    const test = vi.fn().mockResolvedValue({ ok: true, team_id: 'T012TEAM' })
+    ;(gw as unknown as { userClient: unknown }).userClient = { auth: { test } }
+
+    await expect(gw.resolveTeamId()).resolves.toBe('T012TEAM')
+    await expect(gw.resolveTeamId()).resolves.toBe('T012TEAM')
+
+    expect(test).toHaveBeenCalledOnce()
+  })
+})
+
 describe('WatchpupGateway.importThread', () => {
   const permalink = 'https://workspace.slack.com/archives/C012ABC34/p1712349999000200?thread_ts=1712345678.000100&cid=C012ABC34'
 

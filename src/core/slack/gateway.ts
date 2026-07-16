@@ -60,6 +60,8 @@ export class WatchpupGateway extends EventEmitter {
   private poller: SearchPoller | null = null
   private followPoller: ThreadFollowPoller | null = null
   private newsPoller: SlackNewsPoller | null = null
+  private slackTeamId: string | null = null
+  private slackTeamIdRequest: Promise<string | null> | null = null
   private pendingThreadImports = new Map<string, string>()
   /** 내가 속한 유저그룹 ID/핸들(@team) — attachUserSearch에서 usergroups.list로 채워짐(usergroups:read 필요) */
   private myGroupIds: string[] = []
@@ -105,8 +107,32 @@ export class WatchpupGateway extends EventEmitter {
     return this.userClient ?? this.botClient
   }
 
+  /** native Slack deep link에 필요한 workspace ID를 현재 토큰으로 한 번만 조회한다. */
+  async resolveTeamId(): Promise<string | null> {
+    if (this.slackTeamId) return this.slackTeamId
+    if (this.slackTeamIdRequest) return this.slackTeamIdRequest
+    const client = this.replyClient()
+    if (!client) return null
+
+    this.slackTeamIdRequest = (async () => {
+      try {
+        const response = await client.auth.test()
+        const teamId = typeof response.team_id === 'string' ? response.team_id : ''
+        this.slackTeamId = teamId || null
+        return this.slackTeamId
+      } catch (error) {
+        logger.warn('Slack workspace ID 조회 실패', { error: String(error) })
+        return null
+      } finally {
+        this.slackTeamIdRequest = null
+      }
+    })()
+    return this.slackTeamIdRequest
+  }
+
   /** 쓰기 작업(답장·리액션)을 사용자 계정으로 실행할 수 있도록 User Token 클라이언트를 준비한다. */
   attachUserToken(userToken: string): void {
+    this.slackTeamId = null
     this.userClient = new WebClient(userToken)
     this.attachFollowPoller(this.userClient, this.cfg().mySlackUserId, this.cfg().searchIntervalSec)
     this.attachNewsPoller(this.userClient, this.cfg().searchIntervalSec)
@@ -144,6 +170,7 @@ export class WatchpupGateway extends EventEmitter {
 
   /** 봇(소켓) 소스 부착 — 봇이 초대된 채널의 @나 멘션/스레드 후속을 즉시 감지 */
   attachSocket(botToken: string, appToken: string): void {
+    this.slackTeamId = null
     this.app = new App({ token: botToken, appToken, socketMode: true, logLevel: LogLevel.WARN })
     this.botClient = this.app.client
     this.app.message(async ({ message }) => {
