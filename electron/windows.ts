@@ -53,13 +53,22 @@ export interface SavedBounds {
 }
 
 
+/** 저장된 좌표(창 좌상단)가 현재 연결된 디스플레이 중 어느 곳에도 속하지 않으면 오프스크린으로 판단. */
+function isOnScreen(x: number, y: number): boolean {
+  return screen.getAllDisplays().some(({ bounds }) =>
+    x >= bounds.x && x < bounds.x + bounds.width && y >= bounds.y && y < bounds.y + bounds.height
+  )
+}
+
 /** 마스터-디테일 패널 창(목록 + 스레드 + watchpup 한 창). 저장된 크기 있으면 복원. */
 export function createPanelWindow(saved?: SavedBounds): BrowserWindow {
+  // 저장된 좌표가 오프스크린(분리된 모니터 등)이면 버리고 Electron 기본(주 디스플레이 중앙)에 맡긴다.
+  const savedPosValid = saved?.x !== undefined && saved?.y !== undefined && isOnScreen(saved.x, saved.y)
   const win = new BrowserWindow({
     width: saved?.width ?? 1060,
     height: saved?.height ?? 800,
-    x: saved?.x,
-    y: saved?.y,
+    x: savedPosValid ? saved!.x : undefined,
+    y: savedPosValid ? saved!.y : undefined,
     minWidth: 680,
     minHeight: 480,
     frame: false,
@@ -75,6 +84,11 @@ export function createPanelWindow(saved?: SavedBounds): BrowserWindow {
     acceptFirstMouse: true,
     webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: false },
   })
+  // 모든 Space(가상 데스크톱)에 소속시켜, 어느 Space에서 펫을 눌러도 패널이
+  // 현재 Space에 뜨게 한다(원래 만들어진 Space로 전환되는 문제 방지). 펫과 동일.
+  if (process.platform === 'darwin') {
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
   win.loadFile(rendererPath('panel', 'index.html')).catch(() => {
     /* renderer/panel은 B6에서 생성 — 그 전까지는 404 무시 */
   })

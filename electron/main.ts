@@ -314,7 +314,21 @@ async function main(): Promise<void> {
 
   function activatePanel(win: BrowserWindow): void {
     setPanelSwitcherVisibility(app, true)
+    // 활성 디스플레이(커서가 있는 화면)에 없으면 그 화면 중앙으로 재배치.
+    // 이미 활성 화면에 있으면 사용자가 옮겨둔 위치를 존중해 이동하지 않는다.
+    const cursor = screen.getCursorScreenPoint()
+    const target = screen.getDisplayNearestPoint(cursor)
+    const b = win.getBounds()
+    if (screen.getDisplayMatching(b).id !== target.id) {
+      const wa = target.workArea
+      const x = Math.round(wa.x + (wa.width - b.width) / 2)
+      const y = Math.round(wa.y + (wa.height - b.height) / 2)
+      win.setBounds({ x, y, width: b.width, height: b.height })
+    }
+    // 패널은 생성 시 setVisibleOnAllWorkspaces(true)로 모든 Space에 소속돼 있어,
+    // 어느 Space에서 열어도 현재 Space에 그대로 뜬다(원래 Space로 전환되지 않음).
     if (!win.isVisible()) win.show()
+    else win.moveTop()
     // BrowserWindow.focus()만 호출하면 비활성 NSPanel인 펫에서 열었을 때
     // macOS 앱 자체는 비활성 상태로 남을 수 있다.
     if (process.platform === 'darwin') app.focus({ steal: true })
