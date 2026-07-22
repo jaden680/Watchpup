@@ -62,9 +62,9 @@ import { WorkAgentStore } from '../src/core/workagent/store.js'
 import { WorkAgentPoller } from '../src/core/workagent/poller.js'
 import { runWorkProposal, cleanupWorkProposal, chatWorkProposal } from '../src/core/workagent/run.js'
 import { PLAN_FILE } from '../src/core/workagent/prompt.js'
-import type { WorkTaskPrefs } from '../src/core/workagent/types.js'
+import type { WorkProposal, WorkTaskPrefs } from '../src/core/workagent/types.js'
 import { openProposalSession, resolveWorkAgentRepo } from './work-agent.js'
-import { runWorkProposalInOrca } from './work-agent-orca.js'
+import { runWorkProposalInOrca, switchToOrcaTerminal } from './work-agent-orca.js'
 import { isGitRepo, scanGitRepos } from './repos-scan.js'
 import { startupSlackSecrets } from '../src/core/startup/access.js'
 import type { CalendarAuthorizationStatus } from './reminders.js'
@@ -183,10 +183,10 @@ async function main(): Promise<void> {
     if (!repoPath) throw new Error('작업할 레포가 없어요. 설정 → 저장소에서 코드 레포를 등록해주세요.')
     workAgentBusy = true
     try {
-      // 재실행이면 이전 worktree를 먼저 정리 (커밋 있는 브랜치는 보존)
+      // 재실행이면 이전 worktree를 먼저 정리
       const previous = workAgent.proposal(item.id)
       if (previous && previous.status !== 'running') await cleanupWorkProposal(previous)
-      workAgent.setProposal({
+      let live: WorkProposal = {
         reminderId: item.id,
         status: 'running',
         source,
@@ -196,12 +196,19 @@ async function main(): Promise<void> {
         worktreePath: '',
         repoPath,
         startedAt: Date.now(),
-      })
+      }
+      workAgent.setProposal(live)
       broadcastWorkAgent(item.id)
+      // 실행 중 확보되는 정보(worktree·세션 id·Orca 터미널)를 즉시 저장 — 재시작해도 세션을 찾아갈 수 있게
+      const onUpdate = (patch: Partial<WorkProposal>): void => {
+        live = { ...live, ...patch }
+        workAgent.setProposal(live)
+        broadcastWorkAgent(item.id)
+      }
       const worktreeRoot = join(current.dataDir, 'work-worktrees')
       // Orca 모드(claude 전용): Orca가 실행 중이면 터미널에서 눈에 보이게 실행, 아니면 headless 폴백
       let result = provider === 'claude' && current.workAgentUseOrca
-        ? await runWorkProposalInOrca({ config: deps.config }, { item, subtasks, repoPath, model, worktreeRoot, source })
+        ? await runWorkProposalInOrca({ config: deps.config }, { item, subtasks, repoPath, model, worktreeRoot, source, onUpdate })
         : null
       result ??= await runWorkProposal({ config: deps.config, keychain }, {
         item,
@@ -211,6 +218,7 @@ async function main(): Promise<void> {
         model,
         worktreeRoot,
         source,
+        onUpdate,
       })
       workAgent.setProposal(result)
       broadcastWorkAgent(item.id)
@@ -346,9 +354,14 @@ async function main(): Promise<void> {
     broadcastWorkAgent(reminderId)
     return { ok: true }
   })
-  ipcMain.handle(CMD.workAgentOpen, (_e, reminderId: string) => {
+  ipcMain.handle(CMD.workAgentOpen, async (_e, reminderId: string) => {
     const proposal = workAgent.proposal(reminderId)
     if (!proposal) throw new Error('열 수 있는 제안이 없어요.')
+    // 실행 중에는 새 세션을 만들면 안 되므로 Orca 터미널 전환만 허용
+    if (proposal.status === 'running') {
+      if (await switchToOrcaTerminal(proposal)) return { via: 'orca' as const }
+      throw new Error('실행 중인 세션은 Orca 모드에서만 바로 열 수 있어요. 끝나면 세션 열기로 이어가주세요.')
+    }
     return openProposalSession(proposal)
   })
   // 계획 본문 읽기 — worktree의 WATCHPUP-PLAN.md

@@ -3,7 +3,8 @@
  * work item 본체는 Apple Reminders 소유이므로, watchpup는 제안/설정만 reminderId 키로 보관한다.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
+import { PLAN_FILE, planSummary } from './prompt.js'
 import type { WorkProposal, WorkTaskPrefs } from './types.js'
 
 interface WorkAgentData {
@@ -20,15 +21,25 @@ export class WorkAgentStore {
     this.data = existsSync(path)
       ? { ...structuredClone(EMPTY), ...(JSON.parse(readFileSync(path, 'utf8')) as Partial<WorkAgentData>) }
       : structuredClone(EMPTY)
-    // 앱이 꺼지며 중단된 실행은 실패로 정리 (running은 프로세스 살아있을 때만 유효)
+    // 앱이 꺼지며 중단된 실행 정리: 계획 파일이 이미 있으면 준비됨으로 복구,
+    // 아니면 실패 처리(외부 세션이 계속 돌고 있을 수 있어 세션 열기를 안내).
     let dirty = false
     for (const proposal of Object.values(this.data.proposals)) {
-      if (proposal.status === 'running') {
-        proposal.status = 'failed'
-        proposal.error = '앱이 재시작되어 실행이 중단되었어요.'
-        proposal.finishedAt = proposal.finishedAt ?? Date.now()
-        dirty = true
+      if (proposal.status !== 'running') continue
+      dirty = true
+      proposal.finishedAt = proposal.finishedAt ?? Date.now()
+      const planPath = proposal.worktreePath ? join(proposal.worktreePath, PLAN_FILE) : ''
+      if (planPath && existsSync(planPath)) {
+        proposal.status = 'ready'
+        try {
+          proposal.summary = planSummary(readFileSync(planPath, 'utf8')) || proposal.summary
+        } catch { /* 요약 없이 복구 */ }
+        continue
       }
+      proposal.status = 'failed'
+      proposal.error = proposal.worktreePath
+        ? '앱이 재시작되어 추적이 중단되었어요. 세션이 아직 진행 중일 수 있어요 — "세션 열기"로 확인해보세요.'
+        : '앱이 재시작되어 실행이 중단되었어요.'
     }
     if (dirty) this.persist()
   }

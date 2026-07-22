@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WorkAgentStore } from './store.js'
@@ -50,6 +50,23 @@ describe('WorkAgentStore', () => {
       expect(found?.error).toContain('재시작')
     } finally {
       rmSync(join(path, '..'), { recursive: true, force: true })
+    }
+  })
+
+  it('재기동 시 계획 파일이 이미 있으면 ready로 복구한다', () => {
+    const path = tempPath()
+    const worktree = mkdtempSync(join(tmpdir(), 'watchpup-wt-'))
+    try {
+      writeFileSync(join(worktree, 'WATCHPUP-PLAN.md'), '# 로띠 업데이트 계획\n\n내용', 'utf8')
+      const store = new WorkAgentStore(path)
+      store.setProposal(proposal({ status: 'running', worktreePath: worktree }))
+      const reloaded = new WorkAgentStore(path)
+      const found = reloaded.proposal('r-1')
+      expect(found?.status).toBe('ready')
+      expect(found?.summary).toBe('로띠 업데이트 계획')
+    } finally {
+      rmSync(join(path, '..'), { recursive: true, force: true })
+      rmSync(worktree, { recursive: true, force: true })
     }
   })
 

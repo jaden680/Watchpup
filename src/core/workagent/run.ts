@@ -36,6 +36,8 @@ export interface WorkProposalInput {
   worktreeRoot: string
   source: 'auto' | 'manual'
   onEvent?: (e: AgentStreamEvent) => void
+  /** 실행 중 확보되는 정보(worktree·세션 id 등)를 즉시 저장할 수 있게 알림 — 재시작 복구용 */
+  onUpdate?: (patch: Partial<WorkProposal>) => void
 }
 
 function shortId(reminderId: string): string {
@@ -86,6 +88,7 @@ export async function runWorkProposal(
   }
   const wt = created.worktreePath
   const proposal: WorkProposal = { ...base, branch: created.branch, worktreePath: wt }
+  input.onUpdate?.({ branch: created.branch, worktreePath: wt })
   try {
     const prompt = workAgentPrompt({ item: input.item, subtasks: input.subtasks, parent: input.parent })
     const system = workAgentSystemPrompt()
@@ -121,10 +124,17 @@ export async function runWorkProposal(
         dangerous: true,
         mcpConfigPath,
         secretEnv: env,
-        onEvent: input.onEvent,
+        onEvent: (event) => {
+          // 세션 id는 스트림 시작 시 바로 알 수 있으니 즉시 저장해 재시작에도 이어갈 수 있게 한다
+          if (event.type === 'system' && event.sessionId && !sessionId) {
+            sessionId = event.sessionId
+            input.onUpdate?.({ sessionId })
+          }
+          input.onEvent?.(event)
+        },
       })
       text = result.text
-      sessionId = result.sessionId
+      sessionId = result.sessionId ?? sessionId
       isError = result.isError
     }
 

@@ -362,6 +362,20 @@ async function renderWorkAgentSection(host, item) {
       card.append(el('div', 'work-agent-status', '⏳ 계획 세우는 중…'))
       const started = new Date(proposal.startedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
       card.append(el('p', 'work-agent-meta', `${providerLabel(proposal)} · ${started} 시작 · 진행 상황은 Agent 탭에서`))
+      if (proposal.orcaTerminal) {
+        const watch = el('button', 'primary', 'Orca에서 보기')
+        watch.type = 'button'
+        watch.addEventListener('click', async () => {
+          try {
+            await window.watchpup.workAgentOpen(item.id)
+          } catch (error) {
+            hintEl.textContent = error?.message || 'Orca 터미널을 열지 못했습니다.'
+          }
+        })
+        const actions = el('div', 'work-agent-actions')
+        actions.append(watch)
+        card.append(actions)
+      }
     } else if (proposal.status === 'ready') {
       card.append(el('div', 'work-agent-status', '📝 계획을 미리 세워뒀어요'))
       if (proposal.summary) card.append(el('p', 'work-agent-summary', proposal.summary))
@@ -386,7 +400,8 @@ async function renderWorkAgentSection(host, item) {
 
     if (proposal.status !== 'running') {
       const actions = el('div', 'work-agent-actions')
-      if (proposal.status === 'ready') {
+      // 실패해도 worktree가 있으면 세션이 밖에서 계속 돌고 있을 수 있으니 바로 넘어갈 수 있게 한다
+      if (proposal.worktreePath) {
         const open = el('button', 'primary', '세션 열기')
         open.type = 'button'
         open.title = 'Orca 또는 터미널에서 이 계획 세션을 이어서 엽니다'

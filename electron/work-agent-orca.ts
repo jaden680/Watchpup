@@ -72,6 +72,8 @@ export interface OrcaProposalInput {
   model?: string
   worktreeRoot: string
   source: 'auto' | 'manual'
+  /** 실행 중 확보되는 정보(worktree·터미널 핸들)를 즉시 저장 — 재시작 복구용 */
+  onUpdate?: (patch: Partial<WorkProposal>) => void
 }
 
 /**
@@ -103,6 +105,7 @@ export async function runWorkProposalInOrca(
     repoPath: input.repoPath,
     startedAt: Date.now(),
   }
+  input.onUpdate?.({ branch: created.branch, worktreePath: wt })
 
   // 과제 파일은 worktree 밖(스캔 루트)에 둬서 커밋에 섞이지 않게 한다.
   const taskPath = `${wt}-task.md`
@@ -129,6 +132,7 @@ export async function runWorkProposalInOrca(
     }
     handle = parseOrcaTerminalHandle(createRaw)
     if (!handle) throw new Error('터미널 핸들을 찾지 못함')
+    input.onUpdate?.({ orcaTerminal: handle })
     await orca(['terminal', 'wait', '--terminal', handle, '--for', 'tui-idle', '--timeout-ms', '90000', '--json'], 100_000)
     await orca(['terminal', 'send', '--terminal', handle, '--text', `${taskPath} 파일을 읽고, 그 안의 지시를 이 worktree에서 그대로 수행해줘.`, '--enter', '--json'])
     // 시작하자마자 Orca에서 바로 보이도록 해당 터미널로 전환. 수동 실행이면 Orca 앱도 앞으로.
