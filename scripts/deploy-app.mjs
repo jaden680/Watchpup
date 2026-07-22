@@ -14,7 +14,9 @@ import { homedir } from 'node:os'
 
 const SOURCE = join(process.cwd(), 'out', 'mac-arm64', 'Watchpup.app')
 const TARGET = '/Applications/Watchpup.app'
-const trashDir = join(homedir(), 'Desktop', 'git', '.trash', new Date().toISOString().slice(0, 10))
+const now = new Date()
+const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+const trashDir = join(homedir(), 'Desktop', 'git', '.trash', localDate)
 
 if (!existsSync(SOURCE)) {
   console.error(`빌드 산출물이 없습니다: ${SOURCE}\n먼저 npm run deploy 로 실행하세요.`)
