@@ -500,12 +500,32 @@ async function renderWorkAgentSection(host, item) {
   model.type = 'text'
   model.placeholder = '모델 (비우면 기본)'
   model.value = prefs.model || ''
+  // 태스크별 레포: 여러 레포 사용 시 이 작업이 어느 레포에서 진행될지 고정
+  const repo = el('select')
+  const repoAuto = el('option', '', '레포 자동 (링크 매칭)')
+  repoAuto.value = ''
+  repo.append(repoAuto)
+  window.watchpup.reposList().then((paths) => {
+    for (const path of paths || []) {
+      const option = el('option', '', path.split('/').pop() || path)
+      option.value = path
+      option.title = path
+      repo.append(option)
+    }
+    if (prefs.repo && ![...repo.options].some((option) => option.value === prefs.repo)) {
+      const missing = el('option', '', `${prefs.repo.split('/').pop()} (저장값)`)
+      missing.value = prefs.repo
+      repo.append(missing)
+    }
+    repo.value = prefs.repo || ''
+  }).catch(() => {})
   const savePrefs = () => {
-    void window.watchpup.workAgentPrefsSet(item.id, { provider: provider.value, model: model.value.trim() }).catch(() => {})
+    void window.watchpup.workAgentPrefsSet(item.id, { provider: provider.value, model: model.value.trim(), repo: repo.value }).catch(() => {})
   }
   provider.addEventListener('change', savePrefs)
   model.addEventListener('change', savePrefs)
-  controls.append(autoLabel, provider, model)
+  repo.addEventListener('change', savePrefs)
+  controls.append(autoLabel, provider, model, repo)
   if (!proposal) {
     const run = el('button', 'primary', busy ? '다른 작업 실행 중…' : '지금 계획 세워보기')
     run.type = 'button'

@@ -177,7 +177,7 @@ async function main(): Promise<void> {
     const prefs = workAgent.prefs(item.id)
     const provider = prefs.provider || current.workAgentProvider
     const model = (prefs.model?.trim() || (provider === 'codex' ? current.workAgentCodexModel : current.workAgentModel)).trim()
-    const repoPath = resolveWorkAgentRepo(item, current)
+    const repoPath = resolveWorkAgentRepo(item, current, prefs.repo)
     if (!repoPath) throw new Error('작업할 레포가 없어요. 설정 → 저장소에서 코드 레포를 등록해주세요.')
     workAgentBusy = true
     try {
@@ -323,7 +323,7 @@ async function main(): Promise<void> {
     const items = await reminders.tasks(current.reminderListId, false)
     const item = items.find((candidate) => candidate.id === reminderId)
     if (!item) throw new Error('작업을 찾지 못했어요.')
-    if (!resolveWorkAgentRepo(item, current)) throw new Error('작업할 레포가 없어요. 설정 → 저장소에서 코드 레포를 등록해주세요.')
+    if (!resolveWorkAgentRepo(item, current, workAgent.prefs(reminderId).repo)) throw new Error('작업할 레포가 없어요. 설정 → 저장소에서 코드 레포를 등록해주세요.')
     // 실행은 수 분 걸릴 수 있어 시작만 하고, 결과는 workagent.changed 이벤트로 전달한다.
     void runWorkAgentFor(item, items.filter((candidate) => candidate.parentId === item.id), 'manual')
       .catch((e) => console.error('workagent 수동 실행 실패', e))

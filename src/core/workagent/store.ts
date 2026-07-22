@@ -68,6 +68,7 @@ export class WorkAgentStore {
     if (merged.auto !== false) delete merged.auto
     if (!merged.provider) delete merged.provider
     if (!merged.model?.trim()) delete merged.model
+    if (!merged.repo?.trim()) delete merged.repo
     if (Object.keys(merged).length) this.data.prefs[reminderId] = merged
     else delete this.data.prefs[reminderId]
     this.persist()

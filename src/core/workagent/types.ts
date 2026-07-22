@@ -36,4 +36,6 @@ export interface WorkTaskPrefs {
   auto?: boolean
   provider?: WorkAgentProvider
   model?: string
+  /** 이 작업을 진행할 레포 경로. 비어있으면 링크 매칭 → 기본 레포 순으로 자동 결정 */
+  repo?: string
 }

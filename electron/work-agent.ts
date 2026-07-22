@@ -80,10 +80,11 @@ export function githubRepoName(url: string): string | null {
 }
 
 /**
- * 작업할 레포 결정: 작업의 GitHub 링크와 등록 레포 이름 매칭 → 설정의 기본 레포 → 첫 등록 레포.
- * 없으면 null.
+ * 작업할 레포 결정: 태스크별 지정 레포 → 작업의 GitHub 링크와 등록 레포 이름 매칭
+ * → 설정의 기본 레포 → 첫 등록 레포. 없으면 null.
  */
-export function resolveWorkAgentRepo(item: WorkItem, config: WatchpupConfig): string | null {
+export function resolveWorkAgentRepo(item: WorkItem, config: WatchpupConfig, preferredRepo?: string): string | null {
+  if (preferredRepo && existsSync(join(preferredRepo, '.git'))) return preferredRepo
   const repos = (config.repos ?? []).filter((path) => existsSync(join(path, '.git')))
   for (const link of item.links ?? []) {
     if (link.kind !== 'github') continue
