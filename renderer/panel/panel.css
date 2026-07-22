@@ -2180,3 +2180,51 @@ details.review .hint { margin: 0; }
   padding: 7px 10px;
 }
 #repos-gh-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* ---- Work 에이전트 제안 (계획 카드 + 논의 채팅) ---- */
+.work-agent-chip {
+  padding: 1px 6px; border-radius: 999px; font-size: 9px; font-family: var(--font-mono);
+  background: var(--bg-sunken); color: var(--fg-muted);
+}
+.work-agent-chip.ready { background: var(--accent-soft); color: var(--accent-strong); }
+.work-agent-card {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-2);
+  background: var(--bg-elev);
+}
+.work-agent-card.status-ready { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.work-agent-card.status-failed { border-color: var(--border-strong); }
+.work-agent-status { font-weight: 700; font-size: 12.5px; color: var(--fg); }
+.work-agent-summary { margin: 0; font-size: 12.5px; color: var(--fg); line-height: 1.55; overflow-wrap: anywhere; }
+.work-agent-meta { margin: 0; font-size: 11px; color: var(--fg-faint); font-family: var(--font-mono); overflow-wrap: anywhere; }
+.work-agent-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.work-agent-plan summary {
+  cursor: pointer; font-size: 11.5px; font-weight: 600; color: var(--fg-muted);
+}
+.work-agent-plan summary:hover { color: var(--fg); }
+.work-agent-plan-body {
+  margin-top: var(--sp-2); padding: var(--sp-3); max-height: 320px; overflow-y: auto;
+  border-left: 2px solid var(--border-strong); font-size: 12px; line-height: 1.65; color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+.work-agent-chat-log { display: flex; flex-direction: column; gap: var(--sp-2); max-height: 260px; overflow-y: auto; }
+.work-agent-chat-log:empty { display: none; }
+.work-agent-msg {
+  padding: 7px 10px; border-radius: var(--r-2); font-size: 12.5px; line-height: 1.55;
+  overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.work-agent-msg.me { align-self: flex-end; max-width: 85%; background: var(--accent-soft); color: var(--fg); }
+.work-agent-msg.pup { align-self: flex-start; max-width: 95%; background: var(--bg-sunken); color: var(--fg-muted); }
+.work-agent-chat { display: flex; gap: var(--sp-2); }
+.work-agent-chat input {
+  flex: 1; font: inherit; font-size: 12.5px; color: var(--fg);
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--r-2); padding: 7px 10px;
+}
+.work-agent-chat input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.work-agent-controls { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.work-agent-controls select, .work-agent-controls input[type="text"] {
+  font: inherit; font-size: 12px; color: var(--fg);
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--r-2); padding: 5px 8px;
+}
+.work-agent-controls input[type="text"] { width: 150px; }
+.work-agent-auto { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--fg-muted); cursor: pointer; }

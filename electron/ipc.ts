@@ -38,6 +38,14 @@ export const CMD = {
   workLinkStatus: 'work.link.status',
   workLinkAction: 'work.link.action',
   workRemindersOpen: 'work.reminders.open',
+  workAgentGet: 'workagent.get',
+  workAgentList: 'workagent.list',
+  workAgentPrefsSet: 'workagent.prefs.set',
+  workAgentRun: 'workagent.run',
+  workAgentDismiss: 'workagent.dismiss',
+  workAgentOpen: 'workagent.open',
+  workAgentPlan: 'workagent.plan.read',
+  workAgentChat: 'workagent.chat',
 } as const
 
 export const EVT = {
@@ -62,6 +70,8 @@ export const EVT = {
   actionStream: 'action.stream',
   actionDone: 'action.done',
   naggingLogChanged: 'nagging.log.changed',
+  workAgentChanged: 'workagent.changed',
+  workAgentChatStream: 'workagent.chat.stream',
 } as const
 
 export interface ChatSendArgs {
@@ -146,6 +156,12 @@ export interface SettingsPatch {
     folder?: string
   }
   model?: string
+  workAgentEnabled?: boolean
+  workAgentProvider?: 'claude' | 'codex'
+  workAgentModel?: string
+  workAgentCodexModel?: string
+  workAgentIntervalMinutes?: number
+  workAgentRepo?: string
   reminderTaskSortOrder?: 'manual' | 'dueDateThenTitle' | 'createdNewest' | 'updatedNewest' | 'titleAscending'
   reminderTaskManualOrder?: string[]
   showCompletedReminders?: boolean

@@ -100,6 +100,18 @@ export const watchpupConfigSchema = z.object({
   buildAlertsEnabled: z.boolean().default(false),
   xcodeBuildAlertsEnabled: z.boolean().default(true),
   androidBuildAlertsEnabled: z.boolean().default(true),
+  // Work 자동 제안(에이전트): 시간 날 때 Work 상위 작업의 실행 계획을 격리 worktree에서 미리 세워 제안.
+  workAgentEnabled: z.boolean().default(false),
+  workAgentProvider: z.enum(['claude', 'codex']).default('claude'),
+  // 빈 값 = 전역 Claude 모델(model)을 따름
+  workAgentModel: z.string().default(''),
+  // 빈 값 = Codex CLI 기본 모델
+  workAgentCodexModel: z.string().default(''),
+  workAgentIntervalMinutes: z.number().int().min(5).max(240).default(30),
+  // 자동 제안 후보로 삼을 목록 상위 개수
+  workAgentTopN: z.number().int().min(1).max(10).default(3),
+  // 기본 작업 레포. 빈 값 = 작업 링크(GitHub)와 등록 레포 자동 매칭 → 첫 등록 레포
+  workAgentRepo: z.string().default(''),
   // Work 탭에서 사용할 Apple Reminders 목록. Watchpup이 자체적으로 선택을 저장한다.
   reminderListId: z.string().default(''),
   reminderListName: z.string().default(''),

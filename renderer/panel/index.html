@@ -192,6 +192,7 @@
           <button type="button" class="sset-tab active" data-sset="detect">슬랙 설정</button>
           <button type="button" class="sset-tab" data-sset="pet">펫</button>
           <button type="button" class="sset-tab" data-sset="nagging">잔소리</button>
+          <button type="button" class="sset-tab" data-sset="workagent">Work 에이전트</button>
           <button type="button" class="sset-tab" data-sset="flow">워크플로우</button>
           <button type="button" class="sset-tab" data-sset="store">저장소</button>
         </nav>
@@ -470,6 +471,44 @@
                 </div>
               </div>
               <ol id="nagging-log-list" class="nagging-log-list" aria-live="polite"></ol>
+            </fieldset>
+          </div>
+
+          <div class="sset" data-sset="workagent">
+            <fieldset class="nagging-card">
+              <legend>Work 자동 제안 <span class="beta-badge">Beta</span></legend>
+              <label class="checkbox">
+                <input type="checkbox" name="workAgentEnabled" />
+                시간 날 때 Work 작업의 계획을 미리 세워 제안
+              </label>
+              <p class="nagging-copy">Work 목록 상위 3개를 주기적으로 확인해, 격리된 git worktree에서 링크·메모·코드를 조사하고 실행 계획(WATCHPUP-PLAN.md)을 커밋해둡니다. 코드 수정·push·PR은 하지 않아요. 제안이 준비되면 펫이 알려주고, 작업 상세 카드에서 계획을 읽고 바로 논의할 수 있습니다.</p>
+              <label>
+                기본 에이전트
+                <select name="workAgentProvider">
+                  <option value="claude">Claude</option>
+                  <option value="codex">Codex</option>
+                </select>
+              </label>
+              <div class="model-setting">
+                <div class="model-setting-head">
+                  <label for="work-agent-model">Claude 기본 모델</label>
+                </div>
+                <select id="work-agent-model" name="workAgentModel"></select>
+                <span class="field-hint">"전역 모델 따름"이면 슬랙 설정의 Claude 모델을 그대로 사용합니다.</span>
+              </div>
+              <label>
+                Codex 기본 모델
+                <input type="text" name="workAgentCodexModel" placeholder="비우면 Codex 기본 모델" autocomplete="off" />
+              </label>
+              <label>
+                확인 주기
+                <span class="nagging-number"><input type="number" name="workAgentIntervalMinutes" min="5" max="240" step="5" value="30" /><span>분</span></span>
+              </label>
+              <label>
+                기본 레포
+                <select id="work-agent-repo" name="workAgentRepo"></select>
+              </label>
+              <p class="hint">작업의 GitHub 링크가 등록된 레포와 이름이 맞으면 그 레포를 우선 사용합니다. 레포 등록은 저장소 탭에서. 태스크별 에이전트·모델·자동 제안 on/off는 Work 탭 각 작업 카드에서 바꿀 수 있어요.</p>
             </fieldset>
           </div>
 

@@ -229,6 +229,22 @@ function modelCatalogHint(catalog) {
   return `${catalog.options.length}개 모델 · Claude CLI ${catalog.cliVersion} · ${cached}${fetched ? ` ${fetched}` : ''}`
 }
 
+// Work 에이전트용 Claude 모델 선택: '' = 전역 모델 따름 옵션을 앞에 붙인다
+function renderWorkAgentModelOptions(current, available) {
+  const select = settingsForm.elements['workAgentModel']
+  if (!select) return
+  const modelState = modelOptionsWithCurrent(current || 'default', available)
+  const options = [{ value: '', label: '전역 모델 따름' }, ...modelState.options]
+  select.replaceChildren(...options.map(({ value, label }) => {
+    const option = document.createElement('option')
+    option.value = value
+    option.textContent = label
+    return option
+  }))
+  select.value = current || ''
+  if (select.value !== (current || '')) select.value = ''
+}
+
 async function loadModelCatalog(current, force = false) {
   if (!modelSelect) return
   modelRefreshButton.disabled = true
@@ -236,6 +252,8 @@ async function loadModelCatalog(current, force = false) {
   try {
     const catalog = force ? await window.watchpup.modelCatalogRefresh() : await window.watchpup.modelCatalogGet()
     renderModelOptions(modelSelect.value || current, catalog.options)
+    const workAgentSelect = settingsForm.elements['workAgentModel']
+    if (workAgentSelect) renderWorkAgentModelOptions(workAgentSelect.value, catalog.options)
     modelHint.textContent = modelCatalogHint(catalog)
   } catch (error) {
     modelHint.textContent = error?.message || 'Claude CLI 모델 목록을 읽지 못했습니다.'
@@ -245,6 +263,25 @@ async function loadModelCatalog(current, force = false) {
 }
 
 modelRefreshButton?.addEventListener('click', () => loadModelCatalog(modelSelect.value, true))
+
+// Work 에이전트 기본 레포: 등록된 코드 레포 중에서 선택 ('' = 자동 매칭)
+async function renderWorkAgentRepoOptions(current) {
+  const select = settingsForm.elements['workAgentRepo']
+  if (!select) return
+  let repos = []
+  try {
+    repos = await window.watchpup.reposList()
+  } catch { /* 레포 목록이 없어도 자동 옵션은 유지 */ }
+  const options = [{ value: '', label: '자동 (GitHub 링크 매칭 → 첫 레포)' }, ...repos.map((path) => ({ value: path, label: path }))]
+  if (current && !repos.includes(current)) options.push({ value: current, label: `현재 저장값 (${current})` })
+  select.replaceChildren(...options.map(({ value, label }) => {
+    const option = document.createElement('option')
+    option.value = value
+    option.textContent = label
+    return option
+  }))
+  select.value = current || ''
+}
 
 function updatePetSizeLabel() {
   if (petSizeInput && petSizeValue) petSizeValue.textContent = `${petSizeInput.value}%`
@@ -400,6 +437,14 @@ async function loadSettings() {
   updateObsidianHint()
   renderModelOptions(cfg.model)
   void loadModelCatalog(cfg.model)
+  if (settingsForm.elements['workAgentEnabled']) {
+    settingsForm.elements['workAgentEnabled'].checked = !!cfg.workAgentEnabled
+    settingsForm.elements['workAgentProvider'].value = cfg.workAgentProvider === 'codex' ? 'codex' : 'claude'
+    settingsForm.elements['workAgentCodexModel'].value = cfg.workAgentCodexModel || ''
+    settingsForm.elements['workAgentIntervalMinutes'].value = cfg.workAgentIntervalMinutes || 30
+    renderWorkAgentModelOptions(cfg.workAgentModel || '')
+    await renderWorkAgentRepoOptions(cfg.workAgentRepo || '')
+  }
   await refreshTokenStatus()
   await renderGroups()
   await renderRepos()
@@ -796,6 +841,16 @@ settingsForm.addEventListener('submit', async (e) => {
   // 빈 값은 patch에서 제외 — 그대로 넣으면 config 기본값을 ''로 덮어써버린다.
   const model = settingsForm.elements['model'].value.trim()
   if (model) patch.model = model
+  // Work 에이전트: 모델·레포는 '' 자체가 의미(전역/자동 따름)라 항상 포함한다.
+  if (settingsForm.elements['workAgentEnabled']) {
+    patch.workAgentEnabled = settingsForm.elements['workAgentEnabled'].checked
+    patch.workAgentProvider = settingsForm.elements['workAgentProvider'].value === 'codex' ? 'codex' : 'claude'
+    patch.workAgentModel = settingsForm.elements['workAgentModel']?.value ?? ''
+    patch.workAgentCodexModel = settingsForm.elements['workAgentCodexModel']?.value.trim() ?? ''
+    patch.workAgentRepo = settingsForm.elements['workAgentRepo']?.value ?? ''
+    const workAgentInterval = parseInt(settingsForm.elements['workAgentIntervalMinutes']?.value ?? '', 10)
+    if (Number.isFinite(workAgentInterval)) patch.workAgentIntervalMinutes = Math.min(240, Math.max(5, workAgentInterval))
+  }
   // 토큰: 입력된 것만 Keychain에 저장(비우면 기존 유지)
   const tokens = {}
   const bt = settingsForm.elements['botToken'].value.trim()

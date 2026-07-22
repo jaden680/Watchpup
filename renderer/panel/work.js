@@ -1,8 +1,8 @@
-import { copyToClipboard } from './richtext.js'
+import { appendMarkdown, copyToClipboard } from './richtext.js'
 import { buildWorkPrompt, sameWorkItems, sortWorkItems, userNoteContent } from './work-support.js'
 
 const KIND_LABEL = { jira: 'Jira', github: 'GitHub', slack: 'Slack', notion: 'Notion', figma: 'Figma', web: 'Web' }
-const state = { items: [], selectedId: '', query: '', kind: '', includeCompleted: false, loading: false, sort: 'dueDateThenTitle', manualOrder: [], dragId: '' }
+const state = { items: [], selectedId: '', query: '', kind: '', includeCompleted: false, loading: false, sort: 'dueDateThenTitle', manualOrder: [], dragId: '', agentStatuses: new Map() }
 
 const listSelect = document.getElementById('work-list-select')
 const listEl = document.getElementById('work-list')
@@ -87,6 +87,9 @@ function renderList() {
     const meta = el('div', 'work-card-meta')
     const number = issueNumber(item)
     if (number) meta.append(el('span', 'work-issue', `#${number}`))
+    const agentStatus = state.agentStatuses.get(item.id)
+    if (agentStatus === 'ready') meta.append(el('span', 'work-agent-chip ready', '📝 제안'))
+    else if (agentStatus === 'running') meta.append(el('span', 'work-agent-chip', '⏳ 제안 중'))
     for (const kind of [...new Set((item.links || []).map((link) => link.kind))].slice(0, 4)) {
       meta.append(el('span', `work-kind kind-${kind}`, KIND_LABEL[kind] || 'Web'))
     }
@@ -203,6 +206,10 @@ function renderDetail() {
   detailEl.append(header)
 
   const body = el('div', 'work-detail-body')
+  const agentSection = el('section', 'work-section work-agent-section')
+  body.append(agentSection)
+  void renderWorkAgentSection(agentSection, item)
+
   const notesSection = el('section', 'work-section')
   const noteHead = el('div', 'work-note-actions')
   noteHead.append(el('h2', '', '메모'))
@@ -315,6 +322,208 @@ function renderDetail() {
   detailEl.append(body)
 }
 
+// ---- 에이전트 제안: 계획(plan)을 미리 세워두고 카드에서 확인·논의 ----
+const agentChats = new Map() // reminderId → [{ role: 'me'|'pup', text, pending }]
+
+function providerLabel(proposal) {
+  const name = proposal.provider === 'codex' ? 'Codex' : 'Claude'
+  return proposal.model ? `${name} · ${proposal.model}` : name
+}
+
+function renderAgentChatLog(log, reminderId) {
+  log.replaceChildren()
+  for (const message of agentChats.get(reminderId) || []) {
+    const row = el('div', `work-agent-msg ${message.role}`)
+    if (message.role === 'pup' && !message.pending) appendMarkdown(row, message.text)
+    else row.textContent = message.text || (message.pending ? '생각 중…' : '')
+    log.append(row)
+  }
+  log.scrollTop = log.scrollHeight
+}
+
+async function renderWorkAgentSection(host, item) {
+  let data
+  try {
+    data = await window.watchpup.workAgentGet(item.id)
+  } catch {
+    host.remove()
+    return
+  }
+  if (!host.isConnected) return
+  const { proposal, prefs, busy } = data
+  host.replaceChildren()
+  const head = el('div', 'work-section-head')
+  head.append(el('h2', '', '에이전트 제안'))
+  host.append(head)
+
+  if (proposal) {
+    const card = el('div', `work-agent-card status-${proposal.status}`)
+    if (proposal.status === 'running') {
+      card.append(el('div', 'work-agent-status', '⏳ 계획 세우는 중…'))
+      const started = new Date(proposal.startedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+      card.append(el('p', 'work-agent-meta', `${providerLabel(proposal)} · ${started} 시작 · 진행 상황은 Agent 탭에서`))
+    } else if (proposal.status === 'ready') {
+      card.append(el('div', 'work-agent-status', '📝 계획을 미리 세워뒀어요'))
+      if (proposal.summary) card.append(el('p', 'work-agent-summary', proposal.summary))
+      const bits = [providerLabel(proposal)]
+      if (proposal.commits) bits.push(`커밋 ${proposal.commits}`)
+      if (proposal.branch) bits.push(proposal.branch)
+      card.append(el('p', 'work-agent-meta', bits.join(' · ')))
+
+      const planBox = el('details', 'work-agent-plan')
+      const planToggle = el('summary', '', '계획 보기')
+      planBox.append(planToggle)
+      const planBody = el('div', 'work-agent-plan-body')
+      planBox.append(planBody)
+      card.append(planBox)
+      window.watchpup.workAgentPlan(item.id).then(({ content }) => {
+        if (content) appendMarkdown(planBody, content)
+        else planBody.textContent = '계획 파일을 찾지 못했어요. 세션에서 확인해주세요.'
+      }).catch(() => { planBody.textContent = '계획을 읽지 못했어요.' })
+    } else {
+      card.append(el('div', 'work-agent-status', '⚠️ 실행 실패'))
+      card.append(el('p', 'work-agent-meta', (proposal.error || '알 수 없는 오류').slice(0, 200)))
+    }
+
+    if (proposal.status !== 'running') {
+      const actions = el('div', 'work-agent-actions')
+      if (proposal.status === 'ready') {
+        const open = el('button', 'primary', '세션 열기')
+        open.type = 'button'
+        open.title = 'Orca 또는 터미널에서 이 계획 세션을 이어서 엽니다'
+        open.addEventListener('click', async () => {
+          open.disabled = true
+          try {
+            await window.watchpup.workAgentOpen(item.id)
+          } catch (error) {
+            hintEl.textContent = error?.message || '세션을 열지 못했습니다.'
+          } finally {
+            open.disabled = false
+          }
+        })
+        actions.append(open)
+      }
+      const rerun = el('button', '', '다시 실행')
+      rerun.type = 'button'
+      rerun.addEventListener('click', async () => {
+        if (!window.confirm('이전 제안 worktree를 정리하고 계획을 다시 세울까요?')) return
+        rerun.disabled = true
+        try {
+          await window.watchpup.workAgentRun(item.id)
+          agentChats.delete(item.id)
+        } catch (error) {
+          hintEl.textContent = error?.message || '다시 실행하지 못했습니다.'
+          rerun.disabled = false
+        }
+      })
+      const dismiss = el('button', '', '지우기')
+      dismiss.type = 'button'
+      dismiss.addEventListener('click', async () => {
+        if (!window.confirm('이 제안을 지울까요? worktree가 정리됩니다(커밋된 계획 브랜치는 유지).')) return
+        dismiss.disabled = true
+        try {
+          await window.watchpup.workAgentDismiss(item.id)
+          agentChats.delete(item.id)
+        } catch (error) {
+          hintEl.textContent = error?.message || '지우지 못했습니다.'
+          dismiss.disabled = false
+        }
+      })
+      actions.append(rerun, dismiss)
+      card.append(actions)
+    }
+    host.append(card)
+
+    // 계획 논의 채팅 (claude 세션 resume). codex는 세션 열기로 논의.
+    if (proposal.status === 'ready') {
+      if (proposal.provider === 'claude' && proposal.sessionId) {
+        const log = el('div', 'work-agent-chat-log')
+        log.id = 'work-agent-chat-log'
+        renderAgentChatLog(log, item.id)
+        const chatForm = el('form', 'work-agent-chat')
+        const input = el('input')
+        input.type = 'text'
+        input.placeholder = '계획에 대해 물어보거나 수정 요청…'
+        input.autocomplete = 'off'
+        const sendBtn = el('button', 'primary', '보내기')
+        sendBtn.type = 'submit'
+        chatForm.append(input, sendBtn)
+        chatForm.addEventListener('submit', async (event) => {
+          event.preventDefault()
+          const text = input.value.trim()
+          if (!text) return
+          input.value = ''
+          sendBtn.disabled = true
+          const messages = agentChats.get(item.id) || []
+          messages.push({ role: 'me', text }, { role: 'pup', text: '', pending: true })
+          agentChats.set(item.id, messages)
+          renderAgentChatLog(log, item.id)
+          try {
+            await window.watchpup.workAgentChat(item.id, text)
+          } catch (error) {
+            const pending = [...messages].reverse().find((message) => message.pending)
+            if (pending) {
+              pending.text = error?.message || '논의 요청에 실패했어요.'
+              pending.pending = false
+            }
+          } finally {
+            const current = document.getElementById('work-agent-chat-log')
+            if (current) renderAgentChatLog(current, item.id)
+            sendBtn.disabled = false
+          }
+        })
+        host.append(log, chatForm)
+      } else if (proposal.provider === 'codex') {
+        host.append(el('p', 'work-agent-meta', '논의는 "세션 열기"에서 이어갈 수 있어요 (Codex).'))
+      }
+    }
+  }
+
+  // 태스크별 설정 + 수동 실행
+  const controls = el('div', 'work-agent-controls')
+  const autoLabel = el('label', 'work-agent-auto')
+  const auto = el('input')
+  auto.type = 'checkbox'
+  auto.checked = prefs.auto !== false
+  auto.addEventListener('change', () => {
+    void window.watchpup.workAgentPrefsSet(item.id, { auto: auto.checked }).catch(() => {})
+  })
+  autoLabel.append(auto, document.createTextNode(' 자동 제안'))
+  const provider = el('select')
+  for (const [value, label] of [['', '기본 에이전트'], ['claude', 'Claude'], ['codex', 'Codex']]) {
+    const option = el('option', '', label)
+    option.value = value
+    provider.append(option)
+  }
+  provider.value = prefs.provider || ''
+  const model = el('input')
+  model.type = 'text'
+  model.placeholder = '모델 (비우면 기본)'
+  model.value = prefs.model || ''
+  const savePrefs = () => {
+    void window.watchpup.workAgentPrefsSet(item.id, { provider: provider.value, model: model.value.trim() }).catch(() => {})
+  }
+  provider.addEventListener('change', savePrefs)
+  model.addEventListener('change', savePrefs)
+  controls.append(autoLabel, provider, model)
+  if (!proposal) {
+    const run = el('button', 'primary', busy ? '다른 작업 실행 중…' : '지금 계획 세워보기')
+    run.type = 'button'
+    run.disabled = !!busy
+    run.addEventListener('click', async () => {
+      run.disabled = true
+      try {
+        await window.watchpup.workAgentRun(item.id)
+      } catch (error) {
+        hintEl.textContent = error?.message || '실행하지 못했습니다.'
+        run.disabled = false
+      }
+    })
+    controls.append(run)
+  }
+  host.append(controls)
+}
+
 function subtasksOf(item) {
   return sortWorkItems(state.items.filter((candidate) => candidate.parentId === item.id), 'dueDateThenTitle')
 }
@@ -404,6 +613,10 @@ export async function refreshWorkView(options = {}) {
   }
   try {
     const nextItems = await window.watchpup.workItems(listSelect.value, state.includeCompleted)
+    try {
+      const proposals = await window.watchpup.workAgentList()
+      state.agentStatuses = new Map((proposals || []).map((proposal) => [proposal.reminderId, proposal.status]))
+    } catch { /* 제안 배지는 없어도 목록은 표시 */ }
     const itemsChanged = !sameWorkItems(state.items, nextItems)
     const previousSelectedId = state.selectedId
     state.items = nextItems
@@ -539,3 +752,32 @@ setInterval(() => {
     void refreshWorkView({ preserveSelection: true, silent: true })
   }
 }, 10_000)
+
+// 에이전트 제안 상태 변경(시작/완료/삭제) → 목록 배지 + 열려 있는 상세 갱신
+window.watchpup.onWorkAgentChanged?.((payload) => {
+  const reminderId = payload?.reminderId
+  if (!reminderId) return
+  if (payload.proposal) state.agentStatuses.set(reminderId, payload.proposal.status)
+  else state.agentStatuses.delete(reminderId)
+  renderList()
+  if (reminderId === state.selectedId) renderDetail()
+})
+
+// 계획 논의 스트리밍 → 진행 중인 말풍선에 누적
+window.watchpup.onWorkAgentChatStream?.(({ reminderId, event }) => {
+  const messages = agentChats.get(reminderId)
+  const pending = messages && [...messages].reverse().find((message) => message.pending)
+  if (!pending || !event) return
+  if (event.type === 'progress' || event.type === 'assistant_text') pending.text += event.text
+  else if (event.type === 'result') {
+    pending.text = event.text
+    pending.pending = false
+  } else if (event.type === 'error') {
+    pending.text = '오류: ' + event.message
+    pending.pending = false
+  }
+  if (reminderId === state.selectedId) {
+    const log = document.getElementById('work-agent-chat-log')
+    if (log) renderAgentChatLog(log, reminderId)
+  }
+})

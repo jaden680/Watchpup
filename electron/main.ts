@@ -58,6 +58,12 @@ import { ensureOpenAtLogin } from './login-item.js'
 import { openExternalLink } from './external-link.js'
 import { GithubPrNotificationPoller, githubPrNaggingLine } from '../src/core/github/notifications.js'
 import { BuildCompletionPoller, buildCompletionLine, type BuildTool } from '../src/core/build/completion-poller.js'
+import { WorkAgentStore } from '../src/core/workagent/store.js'
+import { WorkAgentPoller } from '../src/core/workagent/poller.js'
+import { runWorkProposal, cleanupWorkProposal, chatWorkProposal } from '../src/core/workagent/run.js'
+import { PLAN_FILE } from '../src/core/workagent/prompt.js'
+import type { WorkTaskPrefs } from '../src/core/workagent/types.js'
+import { openProposalSession, resolveWorkAgentRepo } from './work-agent.js'
 import { startupSlackSecrets } from '../src/core/startup/access.js'
 import type { CalendarAuthorizationStatus } from './reminders.js'
 
@@ -67,6 +73,7 @@ let gateway: WatchpupGateway | null = null
 let agentPoller: LocalAgentPoller | null = null
 let githubPrPoller: GithubPrNotificationPoller | null = null
 let buildCompletionPoller: BuildCompletionPoller | null = null
+let workAgentPoller: WorkAgentPoller | null = null
 let unread = 0
 let lastActivity = Date.now()
 let isQuitting = false
@@ -158,6 +165,75 @@ async function main(): Promise<void> {
     lessons,
   }
 
+  // Work 자동 제안: Work 상위 작업을 격리 worktree에서 미리 진행하고 제안. 한 번에 하나만 실행.
+  const workAgent = new WorkAgentStore(join(config.dataDir, 'work-agent.json'))
+  let workAgentBusy = false
+  const broadcastWorkAgent = (reminderId: string): void => {
+    broadcast(EVT.workAgentChanged, { reminderId, proposal: workAgent.proposal(reminderId) ?? null })
+  }
+  async function runWorkAgentFor(item: WorkItem, subtasks: WorkItem[], source: 'auto' | 'manual'): Promise<void> {
+    if (workAgentBusy) throw new Error('이미 다른 제안 작업이 실행 중이에요.')
+    const current = configStore.get()
+    const prefs = workAgent.prefs(item.id)
+    const provider = prefs.provider || current.workAgentProvider
+    const model = (prefs.model?.trim() || (provider === 'codex' ? current.workAgentCodexModel : current.workAgentModel)).trim()
+    const repoPath = resolveWorkAgentRepo(item, current)
+    if (!repoPath) throw new Error('작업할 레포가 없어요. 설정 → 저장소에서 코드 레포를 등록해주세요.')
+    workAgentBusy = true
+    try {
+      // 재실행이면 이전 worktree를 먼저 정리 (커밋 있는 브랜치는 보존)
+      const previous = workAgent.proposal(item.id)
+      if (previous && previous.status !== 'running') await cleanupWorkProposal(previous)
+      workAgent.setProposal({
+        reminderId: item.id,
+        status: 'running',
+        source,
+        provider,
+        model: model || undefined,
+        branch: '',
+        worktreePath: '',
+        repoPath,
+        startedAt: Date.now(),
+      })
+      broadcastWorkAgent(item.id)
+      const result = await runWorkProposal({ config: deps.config, keychain }, {
+        item,
+        subtasks,
+        repoPath,
+        provider,
+        model,
+        worktreeRoot: join(current.dataDir, 'work-worktrees'),
+        source,
+      })
+      workAgent.setProposal(result)
+      broadcastWorkAgent(item.id)
+      if (result.status === 'ready') {
+        send(pet, EVT.bubble, { text: `“${item.title}” 계획을 미리 세워봤어요. 논의해볼래요? 📝`, workItemId: item.id })
+        lastActivity = Date.now()
+      }
+    } finally {
+      workAgentBusy = false
+    }
+  }
+  workAgentPoller = new WorkAgentPoller(
+    () => {
+      const current = configStore.get()
+      return {
+        enabled: current.workAgentEnabled,
+        listId: current.reminderListId,
+        intervalMinutes: current.workAgentIntervalMinutes,
+        topN: current.workAgentTopN,
+        sortOrder: current.reminderTaskSortOrder,
+        manualOrder: current.reminderTaskManualOrder,
+      }
+    },
+    {
+      fetchTasks: (listId) => reminders.tasks(listId, false),
+      store: workAgent,
+      run: (target) => runWorkAgentFor(target.item, target.subtasks, 'auto'),
+    },
+  )
+
   // 렌더러가 창 로드 직후 요청하는 초기 설정 핸들러는 창을 만들기 전에 등록한다.
   // 늦게 등록하면 첫 요청이 실패한 뒤 기본 UI 값(100%)이 그대로 남을 수 있다.
   ipcMain.handle(CMD.settingsGet, () => configStore.get())
@@ -227,6 +303,72 @@ async function main(): Promise<void> {
   ipcMain.handle(CMD.workLinkStatus, (_e, url: string) => workStatus.status(url))
   ipcMain.handle(CMD.workLinkAction, (_e, args: { url: string; actionId: string }) => workStatus.runAction(args.url, args.actionId))
   ipcMain.handle(CMD.workRemindersOpen, () => shell.openPath('/System/Applications/Reminders.app'))
+  // Work 자동 제안: 조회·태스크별 설정·수동 실행·지우기·세션 열기
+  ipcMain.handle(CMD.workAgentGet, (_e, reminderId: string) => {
+    const current = configStore.get()
+    return {
+      proposal: workAgent.proposal(reminderId) ?? null,
+      prefs: workAgent.prefs(reminderId),
+      busy: workAgentBusy,
+      defaults: { provider: current.workAgentProvider, model: current.workAgentModel, codexModel: current.workAgentCodexModel },
+    }
+  })
+  ipcMain.handle(CMD.workAgentList, () => workAgent.proposals())
+  ipcMain.handle(CMD.workAgentPrefsSet, (_e, args: { reminderId: string; prefs: WorkTaskPrefs }) =>
+    workAgent.setPrefs(args.reminderId, args.prefs ?? {}))
+  ipcMain.handle(CMD.workAgentRun, async (_e, reminderId: string) => {
+    if (workAgentBusy) throw new Error('이미 다른 제안 작업이 실행 중이에요.')
+    const current = configStore.get()
+    if (!current.reminderListId) throw new Error('먼저 Work 목록을 선택해주세요.')
+    const items = await reminders.tasks(current.reminderListId, false)
+    const item = items.find((candidate) => candidate.id === reminderId)
+    if (!item) throw new Error('작업을 찾지 못했어요.')
+    if (!resolveWorkAgentRepo(item, current)) throw new Error('작업할 레포가 없어요. 설정 → 저장소에서 코드 레포를 등록해주세요.')
+    // 실행은 수 분 걸릴 수 있어 시작만 하고, 결과는 workagent.changed 이벤트로 전달한다.
+    void runWorkAgentFor(item, items.filter((candidate) => candidate.parentId === item.id), 'manual')
+      .catch((e) => console.error('workagent 수동 실행 실패', e))
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workAgentDismiss, async (_e, reminderId: string) => {
+    const proposal = workAgent.proposal(reminderId)
+    if (proposal) {
+      if (proposal.status === 'running') throw new Error('실행 중인 제안은 지울 수 없어요. 끝날 때까지 기다려주세요.')
+      await cleanupWorkProposal(proposal)
+    }
+    workAgent.removeProposal(reminderId)
+    broadcastWorkAgent(reminderId)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workAgentOpen, (_e, reminderId: string) => {
+    const proposal = workAgent.proposal(reminderId)
+    if (!proposal) throw new Error('열 수 있는 제안이 없어요.')
+    return openProposalSession(proposal)
+  })
+  // 계획 본문 읽기 — worktree의 WATCHPUP-PLAN.md
+  ipcMain.handle(CMD.workAgentPlan, (_e, reminderId: string) => {
+    const proposal = workAgent.proposal(reminderId)
+    if (!proposal?.worktreePath) return { content: '' }
+    try {
+      return { content: readFileSync(join(proposal.worktreePath, PLAN_FILE), 'utf8') }
+    } catch {
+      return { content: '' }
+    }
+  })
+  // 계획 논의(채팅): 제안 세션을 resume해 이어간다. 계획이 수정되면 커밋 수를 갱신.
+  ipcMain.handle(CMD.workAgentChat, async (_e, args: { reminderId: string; text: string }) => {
+    const proposal = workAgent.proposal(args.reminderId)
+    if (!proposal || proposal.status !== 'ready') throw new Error('논의할 제안이 없어요.')
+    const result = await chatWorkProposal({ config: deps.config, keychain }, {
+      proposal,
+      text: String(args.text || '').trim(),
+      onEvent: (event) => broadcast(EVT.workAgentChatStream, { reminderId: args.reminderId, event }),
+    })
+    if (typeof result.commits === 'number' && result.commits !== proposal.commits) {
+      workAgent.setProposal({ ...proposal, commits: result.commits })
+      broadcastWorkAgent(args.reminderId)
+    }
+    return { text: result.text }
+  })
   ipcMain.handle('pet.images.get', () => petImagesFromDir(configStore.get().petImageDir))
   ipcMain.handle('pet.codex.get', () => resolveCodexPet(configStore.get().petCodexDir))
 
@@ -842,6 +984,7 @@ async function main(): Promise<void> {
   scheduleNagging()
   githubPrPoller.start()
   buildCompletionPoller.start()
+  workAgentPoller.start()
   setInterval(() => { void runPriorityNagging() }, 30_000)
   setTimeout(() => { void runPriorityNagging() }, 2_000)
 
@@ -1106,6 +1249,8 @@ async function main(): Promise<void> {
       if (slackNewsChanged) state.clearNaggingSlackNews()
       void gateway?.refreshSlackNews()
     }
+    // Work 자동 제안을 켜면 바로 한 번 후보를 확인한다
+    if ('workAgentEnabled' in patch && c.workAgentEnabled) void workAgentPoller?.pollNow(true)
   })
   // 토큰: 존재 여부만 조회 / 값 저장은 Keychain에만 (설정 변경은 재시작 후 반영)
   ipcMain.handle(CMD.tokensGet, async (): Promise<TokensStatus> => ({
@@ -1200,6 +1345,7 @@ app.on('before-quit', () => {
   agentPoller?.stop()
   githubPrPoller?.stop()
   buildCompletionPoller?.stop()
+  workAgentPoller?.stop()
   gateway?.stop().catch(() => {})
 })
 
