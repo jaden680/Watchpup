@@ -53,7 +53,7 @@ describe('proposalResumeCommand', () => {
   it('provider·세션 유무에 맞는 명령을 만든다', () => {
     const base = { reminderId: 'r', status: 'ready', source: 'auto', branch: 'b', worktreePath: '/wt', repoPath: '/repo', startedAt: 1 } as WorkProposal
     expect(proposalResumeCommand({ ...base, provider: 'claude', sessionId: 'sid' })).toBe('claude --resume sid')
-    expect(proposalResumeCommand({ ...base, provider: 'claude' })).toBe('claude')
+    expect(proposalResumeCommand({ ...base, provider: 'claude' })).toBe('claude --continue')
     expect(proposalResumeCommand({ ...base, provider: 'codex', sessionId: 'sid' })).toBe('codex resume sid')
   })
 })

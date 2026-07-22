@@ -475,6 +475,8 @@ async function renderWorkAgentSection(host, item) {
         host.append(log, chatForm)
       } else if (proposal.provider === 'codex') {
         host.append(el('p', 'work-agent-meta', '논의는 "세션 열기"에서 이어갈 수 있어요 (Codex).'))
+      } else {
+        host.append(el('p', 'work-agent-meta', 'Orca 터미널에서 실행된 제안이에요 — 논의는 "세션 열기"로 그 터미널에서 이어가요.'))
       }
     }
   }

@@ -8,15 +8,16 @@ import { promisify } from 'node:util'
 import type { WatchpupConfig } from '../src/core/config/schema.js'
 import type { WorkItem } from '../src/core/work/types.js'
 import type { WorkProposal } from '../src/core/workagent/types.js'
+import { switchToOrcaTerminal } from './work-agent-orca.js'
 
 const pexec = promisify(execFile)
 
-/** 제안 세션을 이어서 열 셸 명령. 세션 id가 없으면 새 세션으로 연다. */
+/** 제안 세션을 이어서 열 셸 명령. claude는 세션 id가 없으면 그 worktree의 최근 세션을 잇는다. */
 export function proposalResumeCommand(proposal: WorkProposal): string {
   if (proposal.provider === 'codex') {
     return proposal.sessionId ? `codex resume ${proposal.sessionId}` : 'codex'
   }
-  return proposal.sessionId ? `claude --resume ${proposal.sessionId}` : 'claude'
+  return proposal.sessionId ? `claude --resume ${proposal.sessionId}` : 'claude --continue'
 }
 
 async function orcaAvailable(): Promise<boolean> {
@@ -60,13 +61,14 @@ async function openInTerminalApp(proposal: WorkProposal, command: string): Promi
   ], { timeout: 10_000 })
 }
 
-/** 제안 세션 열기. Orca가 설치·실행 중이면 Orca 터미널로, 아니면 Terminal.app으로. */
+/** 제안 세션 열기. 실행했던 Orca 터미널 → Orca 새 터미널 → Terminal.app 순으로 시도. */
 export async function openProposalSession(proposal: WorkProposal): Promise<{ via: 'orca' | 'terminal' }> {
   if (!proposal.worktreePath || !existsSync(proposal.worktreePath)) {
     throw new Error('제안 worktree가 더 이상 존재하지 않아요. 다시 실행해주세요.')
   }
   const command = proposalResumeCommand(proposal)
   if (await orcaAvailable()) {
+    if (await switchToOrcaTerminal(proposal)) return { via: 'orca' }
     if (await openInOrca(proposal, command)) return { via: 'orca' }
   }
   await openInTerminalApp(proposal, command)

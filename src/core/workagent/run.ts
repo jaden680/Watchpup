@@ -42,44 +42,77 @@ function shortId(reminderId: string): string {
   return reminderId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toLowerCase() || 'task'
 }
 
+export interface ProposalWorktree {
+  branch: string
+  worktreePath: string
+  baseRev: string
+}
+
+/** 제안용 격리 worktree 생성. 실패 시 throw. */
+export async function createProposalWorktree(repoPath: string, worktreeRoot: string, reminderId: string): Promise<ProposalWorktree> {
+  if (!existsSync(join(repoPath, '.git'))) throw new Error(`git 레포가 아니에요: ${repoPath}`)
+  const short = shortId(reminderId)
+  const stamp = Date.now().toString(36)
+  const branch = `watchpup/work-${short}-${stamp}`
+  const root = resolve(worktreeRoot)
+  mkdirSync(root, { recursive: true })
+  const worktreePath = join(root, `${short}-${stamp}`)
+  await git(['worktree', 'add', worktreePath, '-b', branch], repoPath)
+  const baseRev = await git(['rev-parse', 'HEAD'], worktreePath)
+  return { branch, worktreePath, baseRev }
+}
+
+/** 남은 변경 자동 커밋 후 base 이후 커밋 수·변경 파일 집계. */
+export async function collectProposalCommits(
+  worktreePath: string,
+  baseRev: string,
+  fallbackTitle: string,
+): Promise<{ commits: number; files: string[] }> {
+  const dirty = await git(['status', '--porcelain'], worktreePath)
+  if (dirty) {
+    await git(['add', '-A'], worktreePath)
+    await git(['commit', '-m', `watchpup: ${fallbackTitle || '자동 제안'}`], worktreePath)
+  }
+  const commits = Number(await git(['rev-list', '--count', `${baseRev}..HEAD`], worktreePath).catch(() => '0')) || 0
+  const files = commits
+    ? (await git(['diff', '--name-only', `${baseRev}..HEAD`], worktreePath).catch(() => '')).split('\n').filter(Boolean)
+    : []
+  return { commits, files }
+}
+
+/** worktree의 마지막 커밋 제목 (요약 폴백용). */
+export async function lastCommitSubject(worktreePath: string): Promise<string> {
+  return git(['log', '-1', '--pretty=%s'], worktreePath).catch(() => '')
+}
+
 /** 실행 결과를 항상 WorkProposal로 반환한다(실패도 failed 제안으로). 던지지 않음. */
 export async function runWorkProposal(
   deps: { config: WatchpupConfig; keychain: Keychain },
   input: WorkProposalInput,
 ): Promise<WorkProposal> {
   const startedAt = Date.now()
-  const short = shortId(input.item.id)
-  const stamp = Date.now().toString(36)
-  const branch = `watchpup/work-${short}-${stamp}`
   const base: WorkProposal = {
     reminderId: input.item.id,
     status: 'failed',
     source: input.source,
     provider: input.provider,
     model: input.model?.trim() || undefined,
-    branch,
+    branch: '',
     worktreePath: '',
     repoPath: input.repoPath,
     startedAt,
   }
 
-  if (!existsSync(join(input.repoPath, '.git'))) {
-    return { ...base, finishedAt: Date.now(), error: `git 레포가 아니에요: ${input.repoPath}` }
-  }
-  const worktreeRoot = resolve(input.worktreeRoot)
-  mkdirSync(worktreeRoot, { recursive: true })
-  const wt = join(worktreeRoot, `${short}-${stamp}`)
-
+  let created: ProposalWorktree
   try {
-    await git(['worktree', 'add', wt, '-b', branch], input.repoPath)
+    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id)
   } catch (e) {
     return { ...base, finishedAt: Date.now(), error: `worktree 생성 실패: ${String(e)}` }
   }
-
-  const proposal: WorkProposal = { ...base, worktreePath: wt }
+  const wt = created.worktreePath
+  const proposal: WorkProposal = { ...base, branch: created.branch, worktreePath: wt, baseRev: created.baseRev }
   try {
-    const baseRev = await git(['rev-parse', 'HEAD'], wt)
-    proposal.baseRev = baseRev
+    const baseRev = created.baseRev
     const prompt = workAgentPrompt({ item: input.item, subtasks: input.subtasks, parent: input.parent })
     const system = workAgentSystemPrompt()
 
@@ -122,15 +155,7 @@ export async function runWorkProposal(
     }
 
     // 에이전트가 커밋을 안 남겼으면 남은 변경을 대신 커밋 (dev.ts와 동일한 안전망)
-    const dirty = await git(['status', '--porcelain'], wt)
-    if (dirty) {
-      await git(['add', '-A'], wt)
-      await git(['commit', '-m', `watchpup: ${input.item.title || '자동 제안'}`], wt)
-    }
-    const commits = Number(await git(['rev-list', '--count', `${baseRev}..HEAD`], wt).catch(() => '0')) || 0
-    const files = commits
-      ? (await git(['diff', '--name-only', `${baseRev}..HEAD`], wt).catch(() => '')).split('\n').filter(Boolean)
-      : []
+    const { commits, files } = await collectProposalCommits(wt, baseRev, input.item.title)
 
     if (isError && commits === 0) {
       return { ...proposal, finishedAt: Date.now(), sessionId, error: text || '에이전트 실행에 실패했어요.' }
@@ -145,7 +170,7 @@ export async function runWorkProposal(
       finishedAt: Date.now(),
     }
   } catch (e) {
-    logger.error('runWorkProposal 실패', { branch, err: String(e) })
+    logger.error('runWorkProposal 실패', { branch: proposal.branch, err: String(e) })
     // worktree는 조사용으로 남겨둔다
     return { ...proposal, finishedAt: Date.now(), error: String(e) }
   }

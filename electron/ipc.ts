@@ -157,6 +157,7 @@ export interface SettingsPatch {
   }
   model?: string
   workAgentEnabled?: boolean
+  workAgentUseOrca?: boolean
   workAgentProvider?: 'claude' | 'codex'
   workAgentModel?: string
   workAgentCodexModel?: string

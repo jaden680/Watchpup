@@ -23,6 +23,8 @@ export interface WorkProposal {
   baseRev?: string
   /** 세션 재개용 id (claude --resume / codex resume) */
   sessionId?: string
+  /** Orca 터미널에서 실행된 경우 그 터미널 핸들 — 세션 열기 시 해당 터미널로 전환 */
+  orcaTerminal?: string
   commits?: number
   filesChanged?: number
   startedAt: number

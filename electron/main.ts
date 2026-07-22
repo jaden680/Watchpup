@@ -64,6 +64,7 @@ import { runWorkProposal, cleanupWorkProposal, chatWorkProposal } from '../src/c
 import { PLAN_FILE } from '../src/core/workagent/prompt.js'
 import type { WorkTaskPrefs } from '../src/core/workagent/types.js'
 import { openProposalSession, resolveWorkAgentRepo } from './work-agent.js'
+import { runWorkProposalInOrca } from './work-agent-orca.js'
 import { isGitRepo, scanGitRepos } from './repos-scan.js'
 import { startupSlackSecrets } from '../src/core/startup/access.js'
 import type { CalendarAuthorizationStatus } from './reminders.js'
@@ -197,13 +198,18 @@ async function main(): Promise<void> {
         startedAt: Date.now(),
       })
       broadcastWorkAgent(item.id)
-      const result = await runWorkProposal({ config: deps.config, keychain }, {
+      const worktreeRoot = join(current.dataDir, 'work-worktrees')
+      // Orca 모드(claude 전용): Orca가 실행 중이면 터미널에서 눈에 보이게 실행, 아니면 headless 폴백
+      let result = provider === 'claude' && current.workAgentUseOrca
+        ? await runWorkProposalInOrca({ config: deps.config }, { item, subtasks, repoPath, model, worktreeRoot, source })
+        : null
+      result ??= await runWorkProposal({ config: deps.config, keychain }, {
         item,
         subtasks,
         repoPath,
         provider,
         model,
-        worktreeRoot: join(current.dataDir, 'work-worktrees'),
+        worktreeRoot,
         source,
       })
       workAgent.setProposal(result)

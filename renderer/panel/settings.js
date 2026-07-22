@@ -439,6 +439,7 @@ async function loadSettings() {
   void loadModelCatalog(cfg.model)
   if (settingsForm.elements['workAgentEnabled']) {
     settingsForm.elements['workAgentEnabled'].checked = !!cfg.workAgentEnabled
+    settingsForm.elements['workAgentUseOrca'].checked = cfg.workAgentUseOrca !== false
     settingsForm.elements['workAgentProvider'].value = cfg.workAgentProvider === 'codex' ? 'codex' : 'claude'
     settingsForm.elements['workAgentCodexModel'].value = cfg.workAgentCodexModel || ''
     settingsForm.elements['workAgentIntervalMinutes'].value = cfg.workAgentIntervalMinutes || 30
@@ -905,6 +906,7 @@ settingsForm.addEventListener('submit', async (e) => {
   // Work 에이전트: 모델·레포는 '' 자체가 의미(전역/자동 따름)라 항상 포함한다.
   if (settingsForm.elements['workAgentEnabled']) {
     patch.workAgentEnabled = settingsForm.elements['workAgentEnabled'].checked
+    patch.workAgentUseOrca = settingsForm.elements['workAgentUseOrca']?.checked !== false
     patch.workAgentProvider = settingsForm.elements['workAgentProvider'].value === 'codex' ? 'codex' : 'claude'
     patch.workAgentModel = settingsForm.elements['workAgentModel']?.value ?? ''
     patch.workAgentCodexModel = settingsForm.elements['workAgentCodexModel']?.value.trim() ?? ''
