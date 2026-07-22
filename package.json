@@ -21,7 +21,8 @@
     "build:app": "node esbuild.electron.mjs",
     "prepare": "npm run build:app",
     "app": "npm run build:app && electron dist/electron/main.js",
-    "dist": "npm run build:app && electron-builder"
+    "dist": "npm run build:app && electron-builder",
+    "deploy": "npm run build:app && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir && node scripts/deploy-app.mjs"
   },
   "dependencies": {
     "@napi-rs/keyring": "^1.1.6",
