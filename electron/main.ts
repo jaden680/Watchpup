@@ -64,6 +64,7 @@ import { runWorkProposal, cleanupWorkProposal, chatWorkProposal } from '../src/c
 import { PLAN_FILE } from '../src/core/workagent/prompt.js'
 import type { WorkTaskPrefs } from '../src/core/workagent/types.js'
 import { openProposalSession, resolveWorkAgentRepo } from './work-agent.js'
+import { isGitRepo, scanGitRepos } from './repos-scan.js'
 import { startupSlackSecrets } from '../src/core/startup/access.js'
 import type { CalendarAuthorizationStatus } from './reminders.js'
 
@@ -672,15 +673,25 @@ async function main(): Promise<void> {
 
   // 코드 레포: 목록·추가(폴더 선택)·삭제 — 코드 원인 조사에 사용(claude --add-dir)
   ipcMain.handle('repos.list', () => configStore.get().repos)
+  // 폴더 선택: git 레포면 바로 등록, 레포들을 모아둔 상위 폴더면 하위 레포 후보를 돌려줘 선택 등록
   ipcMain.handle('repos.add', async () => {
     const r = await dialog.showOpenDialog({ properties: ['openDirectory'] })
-    if (r.canceled || !r.filePaths[0]) return configStore.get().repos
-    const path = r.filePaths[0]
-    const cur = configStore.get().repos
-    const next = cur.includes(path) ? cur : [...cur, path]
-    const c = configStore.update({ repos: next })
-    deps.config = c
-    return c.repos
+    if (r.canceled || !r.filePaths[0]) return null
+    const dir = r.filePaths[0]
+    if (isGitRepo(dir)) {
+      const cur = configStore.get().repos
+      const next = cur.includes(dir) ? cur : [...cur, dir]
+      deps.config = configStore.update({ repos: next })
+      return { repos: deps.config.repos }
+    }
+    return { candidates: scanGitRepos(dir, configStore.get().repos), dir }
+  })
+  ipcMain.handle('repos.addMany', (_e, paths: string[]) => {
+    const valid = (Array.isArray(paths) ? paths : []).filter((path) => typeof path === 'string' && isGitRepo(path))
+    const next = [...configStore.get().repos]
+    for (const path of valid) if (!next.includes(path)) next.push(path)
+    deps.config = configStore.update({ repos: next })
+    return deps.config.repos
   })
   ipcMain.handle('repos.addGithub', async (_e, spec: string) => {
     try {

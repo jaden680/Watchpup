@@ -116,6 +116,7 @@ contextBridge.exposeInMainWorld('watchpup', {
   onMentionsRefresh: (cb: () => void) => sub('mentions.refresh', () => cb()),
   reposList: () => ipcRenderer.invoke('repos.list'),
   reposAdd: () => ipcRenderer.invoke('repos.add'),
+  reposAddMany: (paths: string[]) => ipcRenderer.invoke('repos.addMany', paths),
   reposAddGithub: (spec: string) => ipcRenderer.invoke('repos.addGithub', spec),
   reposRemove: (path: string) => ipcRenderer.invoke('repos.remove', path),
   devRun: (mentionId: string, repoPaths: string[], extraContext: string) =>

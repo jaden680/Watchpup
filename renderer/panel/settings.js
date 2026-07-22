@@ -680,10 +680,71 @@ async function renderRepos() {
     listEl.appendChild(row)
   }
 }
+// 폴더 추가: git 레포면 바로 등록, 상위 폴더면 하위 git 레포 후보를 체크박스로 선택 등록
+function hideRepoScanPanel() {
+  document.getElementById('repos-scan-panel')?.classList.add('hidden')
+  const listEl = document.getElementById('repos-scan-list')
+  if (listEl) listEl.innerHTML = ''
+}
+
+function showRepoScanPanel(dir, candidates) {
+  const panel = document.getElementById('repos-scan-panel')
+  const title = document.getElementById('repos-scan-title')
+  const listEl = document.getElementById('repos-scan-list')
+  if (!panel || !title || !listEl) return
+  listEl.innerHTML = ''
+  title.textContent = `${dir} 하위에서 찾은 git 레포 ${candidates.length}개 — 추가할 레포를 선택하세요.`
+  for (const candidate of candidates) {
+    const row = document.createElement('label')
+    row.className = 'repos-scan-row'
+    const check = document.createElement('input')
+    check.type = 'checkbox'
+    check.value = candidate.path
+    check.checked = !candidate.already
+    check.disabled = candidate.already
+    const name = document.createElement('span')
+    name.className = 'repo-name'
+    name.textContent = candidate.name + (candidate.already ? ' (등록됨)' : '')
+    name.title = candidate.path
+    row.append(check, name)
+    listEl.appendChild(row)
+  }
+  panel.classList.remove('hidden')
+}
+
 document.getElementById('repos-add')?.addEventListener('click', async () => {
-  await window.watchpup.reposAdd()
-  await renderRepos()
+  const status = document.getElementById('repos-add-status')
+  hideRepoScanPanel()
+  if (status) status.textContent = ''
+  const result = await window.watchpup.reposAdd()
+  if (!result) return
+  if (result.repos) {
+    await renderRepos()
+    if (status) status.textContent = '레포 추가됨'
+    return
+  }
+  if (!result.candidates?.length) {
+    if (status) status.textContent = '선택한 폴더와 하위에서 git 레포를 찾지 못했어요.'
+    return
+  }
+  showRepoScanPanel(result.dir, result.candidates)
 })
+
+document.getElementById('repos-scan-add')?.addEventListener('click', async () => {
+  const status = document.getElementById('repos-add-status')
+  const checked = [...document.querySelectorAll('#repos-scan-list input[type="checkbox"]:checked:not(:disabled)')]
+    .map((check) => check.value)
+  if (!checked.length) {
+    if (status) status.textContent = '선택된 레포가 없어요.'
+    return
+  }
+  await window.watchpup.reposAddMany(checked)
+  hideRepoScanPanel()
+  await renderRepos()
+  if (status) status.textContent = `${checked.length}개 레포 추가됨`
+})
+
+document.getElementById('repos-scan-cancel')?.addEventListener('click', () => hideRepoScanPanel())
 document.getElementById('repos-gh-add')?.addEventListener('click', async () => {
   const input = document.getElementById('repos-gh-input')
   const status = document.getElementById('repos-gh-status')

@@ -537,13 +537,22 @@
               <div id="repos-list" class="repos-list"></div>
               <div class="repos-actions">
                 <button type="button" id="repos-add">로컬 폴더 추가</button>
+                <span id="repos-add-status" class="status"></span>
+              </div>
+              <div id="repos-scan-panel" class="repos-scan-panel hidden">
+                <p id="repos-scan-title" class="hint"></p>
+                <div id="repos-scan-list" class="repos-scan-list"></div>
+                <div class="repos-actions">
+                  <button type="button" id="repos-scan-add" class="primary">선택한 레포 추가</button>
+                  <button type="button" id="repos-scan-cancel">취소</button>
+                </div>
               </div>
               <div class="repos-actions">
                 <input type="text" id="repos-gh-input" placeholder="owner/repo 또는 GitHub URL" autocomplete="off" />
                 <button type="button" id="repos-gh-add">GitHub에서 추가</button>
                 <span id="repos-gh-status" class="status"></span>
               </div>
-              <p class="petimg-hint">로컬·GitHub 레포를 Grep/Read로 뒤져 "코드 원인 조사"에서 원인·구현 위치를 찾습니다. GitHub는 한 번 클론해 로컬처럼 쓰고 개발→PR도 됩니다(gh 로그인 필요).</p>
+              <p class="petimg-hint">로컬·GitHub 레포를 Grep/Read로 뒤져 "코드 원인 조사"에서 원인·구현 위치를 찾습니다. GitHub는 한 번 클론해 로컬처럼 쓰고 개발→PR도 됩니다(gh 로그인 필요). 레포들을 모아둔 상위 폴더를 선택하면 하위 git 레포를 찾아 골라서 등록할 수 있어요.</p>
             </fieldset>
           </div>
 

@@ -2228,3 +2228,10 @@ details.review .hint { margin: 0; }
 }
 .work-agent-controls input[type="text"] { width: 150px; }
 .work-agent-auto { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--fg-muted); cursor: pointer; }
+
+/* 레포 상위 폴더 스캔 → 선택 등록 */
+.repos-scan-panel { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-2); background: var(--bg-elev); }
+.repos-scan-panel.hidden { display: none; }
+.repos-scan-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.repos-scan-row { display: flex; align-items: center; gap: var(--sp-2); font-size: 12.5px; color: var(--fg); cursor: pointer; }
+.repos-scan-row input:disabled + .repo-name { color: var(--fg-faint); }
