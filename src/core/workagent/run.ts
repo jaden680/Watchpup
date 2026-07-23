@@ -44,20 +44,37 @@ function shortId(reminderId: string): string {
   return reminderId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toLowerCase() || 'task'
 }
 
+/** 브랜치·worktree 이름용 슬러그 — 작업 제목 기반 ([iOS] 같은 태그 제거, 한글 유지). 비면 id 축약. */
+export function branchSlug(title: string, reminderId: string): string {
+  const slug = title
+    .replace(/\[[^\]]*\]/g, ' ')
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24)
+    .replace(/^-+|-+$/g, '')
+  return slug || shortId(reminderId)
+}
+
 export interface ProposalWorktree {
   branch: string
   worktreePath: string
 }
 
-/** 제안용 격리 worktree 생성. 실패 시 throw. */
-export async function createProposalWorktree(repoPath: string, worktreeRoot: string, reminderId: string): Promise<ProposalWorktree> {
+/** 제안용 격리 worktree 생성. 이름은 작업 제목 슬러그 기반. 실패 시 throw. */
+export async function createProposalWorktree(
+  repoPath: string,
+  worktreeRoot: string,
+  reminderId: string,
+  title = '',
+): Promise<ProposalWorktree> {
   if (!existsSync(join(repoPath, '.git'))) throw new Error(`git 레포가 아니에요: ${repoPath}`)
-  const short = shortId(reminderId)
+  const slug = branchSlug(title, reminderId)
   const stamp = Date.now().toString(36)
-  const branch = `watchpup/work-${short}-${stamp}`
+  const branch = `watchpup/${slug}-${stamp}`
   const root = resolve(worktreeRoot)
   mkdirSync(root, { recursive: true })
-  const worktreePath = join(root, `${short}-${stamp}`)
+  const worktreePath = join(root, `${slug}-${stamp}`)
   await git(['worktree', 'add', worktreePath, '-b', branch], repoPath)
   return { branch, worktreePath }
 }
@@ -82,7 +99,7 @@ export async function runWorkProposal(
 
   let created: ProposalWorktree
   try {
-    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id)
+    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id, input.item.title)
   } catch (e) {
     return { ...base, finishedAt: Date.now(), error: `worktree 생성 실패: ${String(e)}` }
   }

@@ -88,7 +88,7 @@ export async function runWorkProposalInOrca(
 
   let created: ProposalWorktree
   try {
-    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id)
+    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id, input.item.title)
   } catch (e) {
     logger.warn('Orca 제안 worktree 생성 실패 — headless 폴백', { err: String(e) })
     return null
@@ -115,10 +115,11 @@ export async function runWorkProposalInOrca(
   try {
     // Orca는 등록된 레포의 외부 worktree를 자동 발견하므로 path 셀렉터로 바로 터미널을 만든다.
     // (worktree 폴더를 repo add 하면 별도 워크스페이스가 중복 생성돼 지저분해짐)
+    const shortTitle = (input.item.title || created.branch.split('/').pop() || 'work').slice(0, 40)
     const terminalArgs = [
       'terminal', 'create',
       '--worktree', `path:${resolve(wt)}`,
-      '--title', `🐾 ${created.branch.split('/').pop() || 'work'}`,
+      '--title', `🐾 ${shortTitle}`,
       '--command', claudeCommand(deps.config, input.model),
       '--json',
     ]
@@ -133,6 +134,8 @@ export async function runWorkProposalInOrca(
     handle = parseOrcaTerminalHandle(createRaw)
     if (!handle) throw new Error('터미널 핸들을 찾지 못함')
     input.onUpdate?.({ orcaTerminal: handle })
+    // 워크트리 카드에서 어떤 작업인지 보이게 표시 이름·코멘트 설정 (실패해도 무시)
+    await orca(['worktree', 'set', '--worktree', `path:${resolve(wt)}`, '--display-name', `🐾 ${shortTitle}`, '--comment', '계획 세우는 중', '--json']).catch(() => {})
     await orca(['terminal', 'wait', '--terminal', handle, '--for', 'tui-idle', '--timeout-ms', '90000', '--json'], 100_000)
     await orca(['terminal', 'send', '--terminal', handle, '--text', `${taskPath} 파일을 읽고, 그 안의 지시를 이 worktree에서 그대로 수행해줘.`, '--enter', '--json'])
     // 시작하자마자 Orca에서 바로 보이도록 해당 터미널로 전환. 수동 실행이면 Orca 앱도 앞으로.
@@ -150,6 +153,7 @@ export async function runWorkProposalInOrca(
     try {
       summary = planSummary(readFileSync(planPath, 'utf8')) || undefined
     } catch { /* 요약 없이 진행 */ }
+    void orca(['worktree', 'set', '--worktree', `path:${resolve(wt)}`, '--comment', '계획 완료 — 논의 대기', '--json']).catch(() => {})
     return { ...base, status: 'ready', orcaTerminal: handle ?? undefined, summary, finishedAt: Date.now() }
   }
   const deadline = Date.now() + ORCA_RUN_TIMEOUT_MS
