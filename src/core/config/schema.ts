@@ -110,6 +110,8 @@ export const watchpupConfigSchema = z.object({
   workAgentIntervalMinutes: z.number().int().min(5).max(240).default(30),
   // Orca가 설치·실행 중이면 제안 작업을 Orca 터미널에서 눈에 보이게 실행 (claude 전용, 없으면 헤드리스 폴백)
   workAgentUseOrca: z.boolean().default(true),
+  // 브랜치명을 haiku로 영어 슬러그화 (호출 비용 소액 발생). 꺼져 있으면 work-<id축약> 형태
+  workAgentEnglishBranch: z.boolean().default(false),
   // Work 탭에서 사용할 Apple Reminders 목록. Watchpup이 자체적으로 선택을 저장한다.
   reminderListId: z.string().default(''),
   reminderListName: z.string().default(''),

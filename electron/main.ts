@@ -212,8 +212,8 @@ async function main(): Promise<void> {
         broadcastWorkAgent(item.id)
       }
       const worktreeRoot = join(current.dataDir, 'work-worktrees')
-      // 브랜치명은 제목을 영어로 최적화한 슬러그 사용 (haiku 단발 호출, 실패 시 제목 슬러그 폴백)
-      const slug = await generateBranchSlug({ config: deps.config }, item.title)
+      // 브랜치명: 설정을 켠 경우에만 haiku로 영어 슬러그 생성 (비용 소액), 아니면 work-<id축약>
+      const slug = current.workAgentEnglishBranch ? await generateBranchSlug({ config: deps.config }, item.title) : ''
       // Orca 모드(claude 전용): Orca가 실행 중이면 터미널에서 눈에 보이게 실행, 아니면 headless 폴백
       let result = provider === 'claude' && current.workAgentUseOrca
         ? await runWorkProposalInOrca({ config: deps.config }, { item, subtasks, repoPath, model, worktreeRoot, slug, source, onUpdate, signal })

@@ -34,7 +34,7 @@ export interface WorkProposalInput {
   model?: string
   /** worktree들을 모아둘 디렉토리 (예: <dataDir>/work-worktrees) */
   worktreeRoot: string
-  /** 미리 생성한 영어 브랜치 슬러그 (없으면 제목 슬러그 폴백) */
+  /** 미리 생성한 영어 브랜치 슬러그 (없으면 work-<id축약> 폴백) */
   slug?: string
   source: 'auto' | 'manual'
   onEvent?: (e: AgentStreamEvent) => void
@@ -62,7 +62,7 @@ export function sanitizeBranchSlug(text: string): string {
   return /^[a-z0-9][a-z0-9-]{1,31}$/.test(slug) ? slug : ''
 }
 
-/** 작업 제목 → 영어 브랜치 슬러그 (haiku 단발 호출). 실패하면 빈 문자열 (호출측이 한글 슬러그로 폴백). */
+/** 작업 제목 → 영어 브랜치 슬러그 (haiku 단발 호출, 설정으로 opt-in). 실패하면 빈 문자열 → work-<id축약> 폴백. */
 export async function generateBranchSlug(deps: { config: WatchpupConfig }, title: string): Promise<string> {
   if (!title.trim()) return ''
   try {
@@ -86,33 +86,21 @@ export async function generateBranchSlug(deps: { config: WatchpupConfig }, title
   }
 }
 
-/** 브랜치·worktree 이름용 폴백 슬러그 — 작업 제목 기반 ([iOS] 같은 태그 제거, 한글 유지). 비면 id 축약. */
-export function branchSlug(title: string, reminderId: string): string {
-  const slug = title
-    .replace(/\[[^\]]*\]/g, ' ')
-    .normalize('NFC')
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 24)
-    .replace(/^-+|-+$/g, '')
-  return slug || shortId(reminderId)
-}
 
 export interface ProposalWorktree {
   branch: string
   worktreePath: string
 }
 
-/** 제안용 격리 worktree 생성. 이름은 영어 슬러그(있으면) 또는 제목 슬러그. 실패 시 throw. */
+/** 제안용 격리 worktree 생성. 이름은 영어 슬러그(설정 시) 또는 work-<id축약>. 실패 시 throw. */
 export async function createProposalWorktree(
   repoPath: string,
   worktreeRoot: string,
   reminderId: string,
-  title = '',
   englishSlug = '',
 ): Promise<ProposalWorktree> {
   if (!existsSync(join(repoPath, '.git'))) throw new Error(`git 레포가 아니에요: ${repoPath}`)
-  const slug = englishSlug || branchSlug(title, reminderId)
+  const slug = englishSlug || `work-${shortId(reminderId)}`
   const stamp = Date.now().toString(36)
   const branch = `watchpup/${slug}-${stamp}`
   const root = resolve(worktreeRoot)
@@ -142,7 +130,7 @@ export async function runWorkProposal(
 
   let created: ProposalWorktree
   try {
-    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id, input.item.title, input.slug)
+    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id, input.slug)
   } catch (e) {
     return { ...base, finishedAt: Date.now(), error: `worktree 생성 실패: ${String(e)}` }
   }

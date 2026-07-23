@@ -421,6 +421,7 @@ async function loadSettings() {
   if (settingsForm.elements['workAgentEnabled']) {
     settingsForm.elements['workAgentEnabled'].checked = !!cfg.workAgentEnabled
     settingsForm.elements['workAgentUseOrca'].checked = cfg.workAgentUseOrca !== false
+    settingsForm.elements['workAgentEnglishBranch'].checked = !!cfg.workAgentEnglishBranch
     settingsForm.elements['workAgentProvider'].value = cfg.workAgentProvider === 'codex' ? 'codex' : 'claude'
     settingsForm.elements['workAgentCodexModel'].value = cfg.workAgentCodexModel || ''
     settingsForm.elements['workAgentIntervalMinutes'].value = cfg.workAgentIntervalMinutes || 30
@@ -887,6 +888,7 @@ settingsForm.addEventListener('submit', async (e) => {
   if (settingsForm.elements['workAgentEnabled']) {
     patch.workAgentEnabled = settingsForm.elements['workAgentEnabled'].checked
     patch.workAgentUseOrca = settingsForm.elements['workAgentUseOrca']?.checked !== false
+    patch.workAgentEnglishBranch = !!settingsForm.elements['workAgentEnglishBranch']?.checked
     patch.workAgentProvider = settingsForm.elements['workAgentProvider'].value === 'codex' ? 'codex' : 'claude'
     patch.workAgentModel = settingsForm.elements['workAgentModel']?.value ?? ''
     patch.workAgentCodexModel = settingsForm.elements['workAgentCodexModel']?.value.trim() ?? ''

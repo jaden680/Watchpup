@@ -71,7 +71,7 @@ export interface OrcaProposalInput {
   repoPath: string
   model?: string
   worktreeRoot: string
-  /** 미리 생성한 영어 브랜치 슬러그 (없으면 제목 슬러그 폴백) */
+  /** 미리 생성한 영어 브랜치 슬러그 (없으면 work-<id축약> 폴백) */
   slug?: string
   source: 'auto' | 'manual'
   /** 실행 중 확보되는 정보(worktree·터미널 핸들)를 즉시 저장 — 재시작 복구용 */
@@ -92,7 +92,7 @@ export async function runWorkProposalInOrca(
 
   let created: ProposalWorktree
   try {
-    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id, input.item.title, input.slug)
+    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id, input.slug)
   } catch (e) {
     logger.warn('Orca 제안 worktree 생성 실패 — headless 폴백', { err: String(e) })
     return null
