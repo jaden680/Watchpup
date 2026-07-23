@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CMD, EVT } from './ipc.js'
-import type { SettingsPatch, TokensPatch, Playbook } from './ipc.js'
+import type { SettingsPatch, TokensPatch, Playbook, MentionToWorkResult } from './ipc.js'
 
 function sub(channel: string, cb: (payload: unknown) => void): () => void {
   const listener = (_e: unknown, payload: unknown): void => cb(payload)
@@ -14,9 +14,54 @@ contextBridge.exposeInMainWorld('watchpup', {
   onActivityFocus: (cb: (id: unknown) => void) => sub('activity.focus', cb),
   openActivity: (id: string) => ipcRenderer.send('activity.open', id),
   openActivityDetail: (id?: string) => ipcRenderer.send('activity.detail', id),
+  openCalendar: () => ipcRenderer.send('pet.openCalendar'),
+  openCalendarPrivacy: () => ipcRenderer.send('calendar.privacy.open'),
+  requestCalendarAccess: () => ipcRenderer.invoke(CMD.calendarAccessRequest),
+  openBuildTool: (tool: 'xcode' | 'android') => ipcRenderer.send('build.tool.open', tool),
   mentionsList: () => ipcRenderer.invoke(CMD.mentionsList),
+  workLists: () => ipcRenderer.invoke(CMD.workLists),
+  workItems: (listId?: string, includeCompleted = false) => ipcRenderer.invoke(CMD.workItems, { listId, includeCompleted }),
+  workListSelect: (listId: string) => ipcRenderer.invoke(CMD.workListSelect, listId),
+  workReminderCreate: (listId: string, title: string, notes = '') =>
+    ipcRenderer.invoke(CMD.workReminderCreate, { listId, title, notes }),
+  workReminderSubtaskAdd: (parentReminderId: string, title: string) =>
+    ipcRenderer.invoke(CMD.workReminderSubtaskAdd, { parentReminderId, title }),
+  workReminderTitleUpdate: (reminderId: string, title: string) =>
+    ipcRenderer.invoke(CMD.workReminderTitleUpdate, { reminderId, title }),
+  workReminderNoteUpdate: (reminderId: string, note: string) =>
+    ipcRenderer.invoke(CMD.workReminderNoteUpdate, { reminderId, note }),
+  workReminderComplete: (reminderId: string, completed: boolean) =>
+    ipcRenderer.invoke(CMD.workReminderComplete, { reminderId, completed }),
+  workReminderLinkAdd: (reminderId: string, link: { kind: string; title: string; url: string }) =>
+    ipcRenderer.invoke(CMD.workReminderLinkAdd, { reminderId, ...link }),
+  workReminderLinkRemove: (reminderId: string, url: string) =>
+    ipcRenderer.invoke(CMD.workReminderLinkRemove, { reminderId, url }),
+  workReminderLinkUpdate: (reminderId: string, url: string, title: string, newUrl: string) =>
+    ipcRenderer.invoke(CMD.workReminderLinkUpdate, { reminderId, url, title, newUrl }),
+  workItemTouch: (reminderId: string) => ipcRenderer.invoke(CMD.workItemTouch, reminderId),
+  workLinkStatus: (url: string) => ipcRenderer.invoke(CMD.workLinkStatus, url),
+  workLinkAction: (url: string, actionId: string) => ipcRenderer.invoke(CMD.workLinkAction, { url, actionId }),
+  workRemindersOpen: () => ipcRenderer.invoke(CMD.workRemindersOpen),
+  workAgentGet: (reminderId: string) => ipcRenderer.invoke(CMD.workAgentGet, reminderId),
+  workAgentList: () => ipcRenderer.invoke(CMD.workAgentList),
+  workAgentPrefsSet: (reminderId: string, prefs: unknown) => ipcRenderer.invoke(CMD.workAgentPrefsSet, { reminderId, prefs }),
+  workAgentRun: (reminderId: string) => ipcRenderer.invoke(CMD.workAgentRun, reminderId),
+  workAgentCancel: (reminderId: string) => ipcRenderer.invoke(CMD.workAgentCancel, reminderId),
+  workAgentDismiss: (reminderId: string) => ipcRenderer.invoke(CMD.workAgentDismiss, reminderId),
+  workAgentOpen: (reminderId: string) => ipcRenderer.invoke(CMD.workAgentOpen, reminderId),
+  workAgentPlan: (reminderId: string) => ipcRenderer.invoke(CMD.workAgentPlan, reminderId),
+  workAgentPlanOpen: (reminderId: string) => ipcRenderer.invoke(CMD.workAgentPlanOpen, reminderId),
+  workAgentChat: (reminderId: string, text: string) => ipcRenderer.invoke(CMD.workAgentChat, { reminderId, text }),
+  onWorkAgentChanged: (cb: (payload: unknown) => void) => sub(EVT.workAgentChanged, cb),
+  onWorkAgentChatStream: (cb: (payload: unknown) => void) => sub(EVT.workAgentChatStream, cb),
   mentionGet: (id: string) => ipcRenderer.invoke(CMD.mentionGet, id),
   mentionRead: (id: string) => ipcRenderer.invoke(CMD.mentionRead, id),
+  // 이 멘션 스레드에 매핑된 살아있는 Reminder id(없으면 null) — "TODO로 이동" 버튼 표시 여부에 사용
+  mentionReminderLink: (id: string): Promise<string | null> => ipcRenderer.invoke(CMD.mentionReminderLink, id),
+  mentionToWork: (id: string, dueAt?: number): Promise<MentionToWorkResult> =>
+    ipcRenderer.invoke(CMD.mentionToWork, id, dueAt),
+  mentionToWorkAI: (id: string, extra?: string, dueAt?: number): Promise<MentionToWorkResult> =>
+    ipcRenderer.invoke(CMD.mentionToWorkAI, id, extra, dueAt),
   threadImport: (permalink: string) => ipcRenderer.invoke(CMD.threadImport, permalink),
   todoToggle: (id: string, index: number) => ipcRenderer.invoke(CMD.todoToggle, { mentionId: id, index }),
   replyApprove: (id: string) => ipcRenderer.invoke(CMD.replyApprove, id),
@@ -25,6 +70,11 @@ contextBridge.exposeInMainWorld('watchpup', {
   chatSend: (id: string, text: string) => ipcRenderer.invoke(CMD.chatSend, { mentionId: id, text }),
   settingsGet: () => ipcRenderer.invoke(CMD.settingsGet),
   settingsSet: (patch: SettingsPatch) => ipcRenderer.invoke(CMD.settingsSet, patch),
+  modelCatalogGet: () => ipcRenderer.invoke(CMD.modelCatalogGet),
+  modelCatalogRefresh: () => ipcRenderer.invoke(CMD.modelCatalogRefresh),
+  naggingLogList: () => ipcRenderer.invoke(CMD.naggingLogList),
+  naggingLogClear: () => ipcRenderer.invoke(CMD.naggingLogClear),
+  onNaggingLogChanged: (cb: (entry: unknown) => void) => sub(EVT.naggingLogChanged, cb),
   tokensGet: () => ipcRenderer.invoke(CMD.tokensGet),
   tokensSet: (patch: TokensPatch) => ipcRenderer.invoke(CMD.tokensSet, patch),
   playbooksList: () => ipcRenderer.invoke(CMD.playbooksList),
@@ -34,7 +84,7 @@ contextBridge.exposeInMainWorld('watchpup', {
   mcpUpsert: (s: unknown) => ipcRenderer.invoke('mcp.upsert', s),
   mcpRemove: (id: string) => ipcRenderer.invoke('mcp.remove', id),
   mcpImportCandidates: () => ipcRenderer.invoke('mcp.importCandidates'),
-  integrationStatus: () => ipcRenderer.invoke('integration.status'),
+  integrationStatus: (verify = false) => ipcRenderer.invoke('integration.status', verify),
   connectNotion: (token: string) => ipcRenderer.invoke('integration.connectNotion', token),
   connectJira: (a: { site: string; email: string; token: string }) => ipcRenderer.invoke('integration.connectJira', a),
   disconnectIntegration: (id: string) => ipcRenderer.invoke('integration.disconnect', id),
@@ -50,6 +100,8 @@ contextBridge.exposeInMainWorld('watchpup', {
   onPetImages: (cb: (map: unknown) => void) => sub(EVT.petImages, cb),
   onPetSize: (cb: (value: unknown) => void) => sub(EVT.petSize, cb),
   onBubbleSize: (cb: (value: unknown) => void) => sub(EVT.bubbleSize, cb),
+  onBubbleStackCount: (cb: (value: unknown) => void) => sub(EVT.bubbleStackCount, cb),
+  onBubbleDuration: (cb: (value: unknown) => void) => sub(EVT.bubbleDuration, cb),
   onHudSize: (cb: (value: unknown) => void) => sub(EVT.hudSize, cb),
   onHudAlignment: (cb: (value: unknown) => void) => sub(EVT.hudAlignment, cb),
   onHudVisibility: (cb: (value: unknown) => void) => sub(EVT.hudVisibility, cb),
@@ -70,6 +122,7 @@ contextBridge.exposeInMainWorld('watchpup', {
   onMentionsRefresh: (cb: () => void) => sub('mentions.refresh', () => cb()),
   reposList: () => ipcRenderer.invoke('repos.list'),
   reposAdd: () => ipcRenderer.invoke('repos.add'),
+  reposAddMany: (paths: string[]) => ipcRenderer.invoke('repos.addMany', paths),
   reposAddGithub: (spec: string) => ipcRenderer.invoke('repos.addGithub', spec),
   reposRemove: (path: string) => ipcRenderer.invoke('repos.remove', path),
   devRun: (mentionId: string, repoPaths: string[], extraContext: string) =>
@@ -95,9 +148,10 @@ contextBridge.exposeInMainWorld('watchpup', {
   hidePanel: () => ipcRenderer.send('panel.hide'),
   minimizePanel: () => ipcRenderer.send('panel.minimize'),
   maximizePanel: () => ipcRenderer.send('panel.maximize'),
-  onPanelShown: (cb: () => void) => sub('panel.shown', () => cb()),
   openMention: (id: string) => ipcRenderer.send('pet.openMention', id),
   onMentionFocus: (cb: (id: unknown) => void) => sub('mention.focus', cb),
+  onWorkFocus: (cb: (id: unknown) => void) => sub('work.focus', cb),
+  openWorkItem: (id: string) => ipcRenderer.send('pet.openWorkItem', id),
   setTracked: (mentionId: string, tracked: boolean) => ipcRenderer.invoke('mention.setTracked', { mentionId, tracked }),
   removeMention: (id: string) => ipcRenderer.invoke('mention.remove', id),
   cleanupFalseMentions: () => ipcRenderer.invoke('mention.cleanupFalse'),

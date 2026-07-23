@@ -20,6 +20,7 @@
             <button class="tab active" data-tab="mentions" role="tab">멘션</button>
             <button class="tab" data-tab="agent" role="tab">Agent</button>
             <button class="tab" data-tab="todos" role="tab">할 일</button>
+            <button class="tab" data-tab="work" role="tab">Work</button>
             <button class="tab" data-tab="digest" role="tab">주간</button>
             <button class="tab" data-tab="settings" role="tab">설정</button>
           </div>
@@ -44,7 +45,13 @@
               <button type="button" class="cat-chip" data-cat="schedule">일정·미팅</button>
               <button type="button" class="cat-chip" data-cat="chat">잡담</button>
             </div>
-            <button type="button" id="todo-only" class="todo-only-chip">☐ 할 일 남음만</button>
+            <div class="list-filter-row">
+              <button type="button" id="todo-only" class="todo-only-chip">☐ 할 일 남음만</button>
+              <select id="mention-sort" aria-label="멘션 정렬">
+                <option value="lastMessage">최근 메시지순</option>
+                <option value="fetched">가져온 순서</option>
+              </select>
+            </div>
           </div>
           <aside id="list" aria-label="멘션 목록"></aside>
         </div>
@@ -113,6 +120,52 @@
         <div id="todos-body"></div>
       </section>
 
+      <section id="work-view" class="view">
+        <div id="work-list-col">
+          <div id="work-tools">
+            <div class="work-list-picker">
+              <select id="work-list-select" aria-label="Reminder 목록"></select>
+              <button type="button" id="work-open-reminders" title="Reminders 열기" aria-label="Reminders 열기">↗</button>
+              <button type="button" id="work-refresh" title="새로고침" aria-label="새로고침">↻</button>
+            </div>
+            <input id="work-search" type="search" placeholder="작업·메모 검색" autocomplete="off" />
+            <div class="work-filter-row">
+              <select id="work-kind-filter" aria-label="링크 종류 필터">
+                <option value="">모든 링크</option>
+                <option value="jira">Jira</option>
+                <option value="github">GitHub</option>
+                <option value="slack">Slack</option>
+                <option value="notion">Notion</option>
+                <option value="figma">Figma</option>
+                <option value="web">Web</option>
+              </select>
+              <select id="work-sort" aria-label="작업 정렬">
+                <option value="dueDateThenTitle">마감일순</option>
+                <option value="createdNewest">최근 생성순</option>
+                <option value="updatedNewest">최근 변경순</option>
+                <option value="titleAscending">제목순</option>
+                <option value="manual">수동 정렬</option>
+              </select>
+              <button type="button" id="work-sort-reset" class="hidden" title="수동 순서 초기화" aria-label="수동 순서 초기화">↺</button>
+              <label><input type="checkbox" id="work-show-completed" /> 완료 포함</label>
+            </div>
+            <div id="work-source-hint" role="status"></div>
+          </div>
+          <aside id="work-list" aria-label="통합 작업 목록"></aside>
+          <form id="work-create-form" aria-label="새 작업 추가">
+            <input id="work-create-title" type="text" placeholder="새 작업 추가…" aria-label="새 작업 제목" autocomplete="off" required />
+            <button type="submit" class="primary">추가</button>
+          </form>
+        </div>
+        <main id="work-detail" aria-label="통합 작업 상세">
+          <div class="empty">
+            <div class="empty-mark">⌁</div>
+            <p class="empty-title">왼쪽에서 작업을 골라보세요</p>
+            <p class="empty-sub">Reminder 메모에 Jira·GitHub·Slack·Notion 링크를 모아볼 수 있습니다.</p>
+          </div>
+        </main>
+      </section>
+
       <section id="digest-view" class="view">
         <div id="digest-head">
           <div>
@@ -138,6 +191,8 @@
         <nav class="sset-nav">
           <button type="button" class="sset-tab active" data-sset="detect">슬랙 설정</button>
           <button type="button" class="sset-tab" data-sset="pet">펫</button>
+          <button type="button" class="sset-tab" data-sset="nagging">잔소리</button>
+          <button type="button" class="sset-tab" data-sset="workagent">Work 에이전트</button>
           <button type="button" class="sset-tab" data-sset="flow">워크플로우</button>
           <button type="button" class="sset-tab" data-sset="store">저장소</button>
         </nav>
@@ -208,10 +263,14 @@
               </div>
               <p class="petimg-hint">각 스레드를 재검사해, 실제로 나(또는 내 그룹)를 멘션하지 않은 항목(예: GitHub의 평문 @org/repo 오탐)을 제거합니다. 확인 못 한 건 보존.</p>
             </fieldset>
-            <label>
-              모델
-              <input type="text" name="model" placeholder="opus" autocomplete="off" />
-            </label>
+            <div class="model-setting">
+              <div class="model-setting-head">
+                <label for="model-select">Claude 모델</label>
+                <button type="button" id="model-refresh">↻ CLI에서 새로고침</button>
+              </div>
+              <select id="model-select" name="model" aria-describedby="model-hint"></select>
+              <span id="model-hint" class="field-hint">Claude CLI에서 계정의 모델 목록을 확인합니다.</span>
+            </div>
           </div>
 
           <div class="sset" data-sset="pet">
@@ -266,8 +325,19 @@
                 <span>크게</span>
               </span>
             </label>
+            <div class="bubble-behavior-row">
+              <label>
+                최대 말풍선
+                <span class="bubble-number"><input type="number" name="bubbleStackCount" min="1" max="5" step="1" value="3" /><span>개</span></span>
+              </label>
+              <label>
+                노출 시간
+                <span class="bubble-number"><input type="number" name="bubbleDurationSeconds" min="3" max="60" step="1" value="10" /><span>초</span></span>
+              </label>
+            </div>
+            <span class="field-hint">새 말풍선은 펫 가까이에 쌓이고, 오래된 항목부터 사라집니다.</span>
             <label class="checkbox">
-              <input type="checkbox" name="showActivityHud" checked />
+              <input type="checkbox" name="showActivityHud" />
               세션 HUD 표시
             </label>
             <label class="pet-size-field" id="hud-size-field">
@@ -316,6 +386,136 @@
             </div>
           </div>
 
+          <div class="sset" data-sset="nagging">
+            <fieldset class="nagging-card">
+              <legend>잔소리 <span class="beta-badge">Beta</span></legend>
+              <label class="checkbox nagging-toggle">
+                <input type="checkbox" name="naggingEnabled" />
+                시도 때도 없이 말 걸기
+              </label>
+              <p class="nagging-copy">놓치기 쉬운 타이밍을 먼저 잡고, 평소에는 Work 작업이나 GitHub PR, 구독한 Slack 새 소식을 몇 분 단위로 다시 꺼내줘요. 기본값은 꺼짐입니다.</p>
+              <ul class="nagging-priorities" aria-label="잔소리 우선순위">
+                <li><span>1</span>캘린더 일정 5분 전</li>
+                <li><span>2</span>Agent 작업 종료 후 반응이 없을 때</li>
+                <li><span>3</span>나에게 리뷰 요청된 GitHub PR</li>
+                <li><span>4</span>구독한 Slack 새 소식</li>
+                <li><span>5</span>최근 열어본 미완료 Work 작업</li>
+              </ul>
+              <div class="nagging-calendar-access">
+                <span>일정 알림을 쓰고 싶을 때만 macOS 캘린더를 연결합니다.</span>
+                <button type="button" id="nagging-calendar-settings">캘린더 연결</button>
+              </div>
+              <div class="nagging-github-pr">
+                <label class="checkbox">
+                  <input type="checkbox" name="githubPrNaggingEnabled" checked />
+                  나에게 리뷰 요청된 GitHub PR도 가끔 확인
+                </label>
+                <p class="hint">로컬 <code>gh</code> 로그인으로 최근 72시간의 읽지 않은 <code>review_requested</code> 알림만 20분마다 확인합니다. 구독·멘션·참여 알림은 제외합니다.</p>
+              </div>
+              <div class="nagging-slack-news">
+                <label class="checkbox">
+                  <input type="checkbox" name="slackNewsEnabled" />
+                  구독한 Slack 소식을 가끔 섞기
+                </label>
+                <div class="nagging-slack-subscriptions">
+                  <label>
+                    구독 채널
+                    <textarea name="slackNewsChannels" rows="3" placeholder="all_전사공유, all_전사공지, all_random">all_전사공유, all_전사공지, all_random</textarea>
+                  </label>
+                  <label>
+                    구독 키워드
+                    <textarea name="slackNewsKeywords" rows="3" placeholder="iOS, 장애, 신규 기능"></textarea>
+                  </label>
+                </div>
+                <p class="hint">쉼표나 줄바꿈으로 구분합니다. 각 채널·키워드는 20분마다 확인해요. 처음 켤 때는 현재 최신 글을 기준으로 잡고, 이후 새 루트 글만 알려줍니다. Slack User Token의 <code>search:read</code> 권한이 필요합니다.</p>
+              </div>
+              <div class="nagging-interval-row">
+                <label>
+                  최소 간격
+                  <span class="nagging-number"><input type="number" name="naggingMinMinutes" min="1" max="120" step="1" value="5" /><span>분</span></span>
+                </label>
+                <span class="nagging-range-mark">~</span>
+                <label>
+                  최대 간격
+                  <span class="nagging-number"><input type="number" name="naggingMaxMinutes" min="1" max="120" step="1" value="12" /><span>분</span></span>
+                </label>
+              </div>
+              <p id="nagging-hint" class="hint">활성화하면 5~12분 사이의 랜덤한 시점에 Work·GitHub PR·Slack 소식 말풍선이 나타납니다. 캘린더는 별도로 연결한 경우에만 확인합니다.</p>
+            </fieldset>
+            <fieldset class="build-alert-card">
+              <legend>빌드 완료 알림 <span class="beta-badge">Beta</span></legend>
+              <label class="checkbox build-alert-toggle">
+                <input type="checkbox" name="buildAlertsEnabled" />
+                IDE 빌드가 끝나면 바로 말 걸기
+              </label>
+              <p class="nagging-copy">로컬 빌드 로그의 변경분만 확인해 성공·실패를 알려줘요. 외부 API를 호출하지 않으며, 말풍선을 누르면 해당 IDE가 앞으로 옵니다.</p>
+              <div class="build-alert-tools">
+                <label class="checkbox">
+                  <input type="checkbox" name="xcodeBuildAlertsEnabled" checked />
+                  Xcode
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="androidBuildAlertsEnabled" checked />
+                  Android Studio
+                </label>
+              </div>
+              <p id="build-alert-hint" class="hint">현재 꺼져 있어요. 활성화 이후 완료되는 새 빌드부터 알려줍니다.</p>
+            </fieldset>
+            <fieldset class="nagging-debug-card">
+              <legend>디버그 로그</legend>
+              <div class="nagging-log-header">
+                <p><strong id="nagging-log-count">최근 잔소리 0개</strong><span>실제로 말풍선에 표시된 내역을 최신순으로 보관합니다.</span></p>
+                <div>
+                  <button type="button" id="nagging-log-refresh">새로고침</button>
+                  <button type="button" id="nagging-log-clear">비우기</button>
+                </div>
+              </div>
+              <ol id="nagging-log-list" class="nagging-log-list" aria-live="polite"></ol>
+            </fieldset>
+          </div>
+
+          <div class="sset" data-sset="workagent">
+            <fieldset class="nagging-card">
+              <legend>Work 자동 제안 <span class="beta-badge">Beta</span></legend>
+              <label class="checkbox">
+                <input type="checkbox" name="workAgentEnabled" />
+                시간 날 때 Work 작업의 계획을 미리 세워 제안
+              </label>
+              <p class="nagging-copy">시간 날 때마다 미완료 작업을 목록 순서대로 하나씩(주기당 1개) 골라, 격리된 git worktree에서 링크·메모·코드를 조사하고 실행 계획(WATCHPUP-PLAN.md)을 작성해둡니다. 이미 제안이 있는 작업은 건너뛰어요. 코드 수정·커밋·push는 하지 않아요. 제안이 준비되면 펫이 알려주고, 작업 상세 카드에서 계획을 읽고 바로 논의할 수 있습니다.</p>
+              <label class="checkbox">
+                <input type="checkbox" name="workAgentUseOrca" checked />
+                Orca에서 실행 — Orca가 켜져 있으면 작업이 Orca 터미널에서 눈에 보이게 진행 (Claude 전용, 없으면 백그라운드 실행)
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" name="workAgentEnglishBranch" />
+                영어 브랜치명 추천 — 제목을 haiku로 영어 슬러그화 (호출 비용 소액, 끄면 work-id 형태)
+              </label>
+              <label>
+                기본 에이전트
+                <select name="workAgentProvider">
+                  <option value="claude">Claude</option>
+                  <option value="codex">Codex</option>
+                </select>
+              </label>
+              <div class="model-setting">
+                <div class="model-setting-head">
+                  <label for="work-agent-model">Claude 기본 모델</label>
+                </div>
+                <select id="work-agent-model" name="workAgentModel"></select>
+                <span class="field-hint">"전역 모델 따름"이면 슬랙 설정의 Claude 모델을 그대로 사용합니다.</span>
+              </div>
+              <label>
+                Codex 기본 모델
+                <input type="text" name="workAgentCodexModel" placeholder="비우면 Codex 기본 모델" autocomplete="off" />
+              </label>
+              <label>
+                확인 주기
+                <span class="nagging-number"><input type="number" name="workAgentIntervalMinutes" min="5" max="240" step="5" value="30" /><span>분</span></span>
+              </label>
+              <p class="hint">레포는 자동으로 정하지 않아요 — Work 탭 각 작업 카드에서 레포를 지정한 작업만 자동 제안 대상이 됩니다. 태스크별 에이전트·모델·자동 on/off도 각 작업 카드에서 바꿀 수 있어요.</p>
+            </fieldset>
+          </div>
+
           <div class="sset" data-sset="store">
             <fieldset>
               <legend>Obsidian</legend>
@@ -341,13 +541,22 @@
               <div id="repos-list" class="repos-list"></div>
               <div class="repos-actions">
                 <button type="button" id="repos-add">로컬 폴더 추가</button>
+                <span id="repos-add-status" class="status"></span>
+              </div>
+              <div id="repos-scan-panel" class="repos-scan-panel hidden">
+                <p id="repos-scan-title" class="hint"></p>
+                <div id="repos-scan-list" class="repos-scan-list"></div>
+                <div class="repos-actions">
+                  <button type="button" id="repos-scan-add" class="primary">선택한 레포 추가</button>
+                  <button type="button" id="repos-scan-cancel">취소</button>
+                </div>
               </div>
               <div class="repos-actions">
                 <input type="text" id="repos-gh-input" placeholder="owner/repo 또는 GitHub URL" autocomplete="off" />
                 <button type="button" id="repos-gh-add">GitHub에서 추가</button>
                 <span id="repos-gh-status" class="status"></span>
               </div>
-              <p class="petimg-hint">로컬·GitHub 레포를 Grep/Read로 뒤져 "코드 원인 조사"에서 원인·구현 위치를 찾습니다. GitHub는 한 번 클론해 로컬처럼 쓰고 개발→PR도 됩니다(gh 로그인 필요).</p>
+              <p class="petimg-hint">로컬·GitHub 레포를 Grep/Read로 뒤져 "코드 원인 조사"에서 원인·구현 위치를 찾습니다. GitHub는 한 번 클론해 로컬처럼 쓰고 개발→PR도 됩니다(gh 로그인 필요). 레포들을 모아둔 상위 폴더를 선택하면 하위 git 레포를 찾아 골라서 등록할 수 있어요.</p>
             </fieldset>
           </div>
 
@@ -377,7 +586,7 @@
               <label>사이트<input type="text" id="jira-site" placeholder="yourcompany.atlassian.net" autocomplete="off" /></label>
               <label>이메일<input type="text" id="jira-email" placeholder="you@company.com" autocomplete="off" /></label>
               <label>API Token<input type="password" id="jira-token" placeholder="연결됨이면 비워두면 유지" autocomplete="off" /></label>
-              <p class="hint">id.atlassian.com → 보안 → API 토큰 생성.</p>
+              <p class="hint">Atlassian 계정 보안 페이지에서 API 토큰을 생성하세요. <button type="button" id="jira-token-page" class="hint-link">API 토큰 만들기 ↗</button></p>
               <div class="reply-actions">
                 <button type="button" id="jira-connect" class="primary">연결</button>
                 <button type="button" id="jira-disconnect" class="hidden">해제</button>

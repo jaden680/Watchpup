@@ -46,6 +46,8 @@ export interface RunOptions {
   dangerous?: boolean
   /** 스트림 이벤트 콜백 */
   onEvent?: (e: AgentStreamEvent) => void
+  /** 실행 취소 신호 — abort 시 서브프로세스를 종료한다 */
+  signal?: AbortSignal
 }
 
 // 지연 평가: 테스트가 import 이후 process.env.WATCHPUP_CLAUDE_BIN 을 설정하는 경우를 지원.
@@ -53,7 +55,7 @@ function claudeBin(): string {
   return process.env.WATCHPUP_CLAUDE_BIN || 'claude'
 }
 
-function buildArgs(opts: RunOptions): string[] {
+export function buildClaudeArgs(opts: RunOptions): string[] {
   const { config } = opts
   const args = [
     '-p',
@@ -61,13 +63,10 @@ function buildArgs(opts: RunOptions): string[] {
     'stream-json',
     '--verbose',
     '--include-partial-messages',
-    '--model',
-    config.model,
-    '--agents',
-    JSON.stringify(opts.agents),
-    '--append-system-prompt',
-    opts.systemPrompt,
   ]
+  // /model의 Default는 CLI가 기억한 계정 기본 모델을 사용한다.
+  if (config.model !== 'default') args.push('--model', config.model)
+  args.push('--agents', JSON.stringify(opts.agents), '--append-system-prompt', opts.systemPrompt)
   // dev 워크플로우: 격리 worktree에서 자율 편집/git — 권한 bypass. 그 외엔 permission-mode.
   if (opts.dangerous) args.push('--dangerously-skip-permissions')
   else args.push('--permission-mode', opts.permissionMode ?? 'default')
@@ -97,7 +96,7 @@ export function runClaude(opts: RunOptions): Promise<AgentResult> {
   const cwd = opts.cwd ?? config.workDir
   if (!existsSync(cwd)) mkdirSync(cwd, { recursive: true })
 
-  const args = buildArgs(opts)
+  const args = buildClaudeArgs(opts)
   const env = { ...process.env, ...(opts.secretEnv ?? {}), CLAUDECODE: '' }
   const parser = new StreamJsonParser()
 
@@ -105,6 +104,7 @@ export function runClaude(opts: RunOptions): Promise<AgentResult> {
   let sessionId = opts.sessionId
   let costUsd: number | undefined
   let isError = false
+  let sawResult = false
   const toolsUsed: string[] = []
 
   const dispatch = (events: AgentStreamEvent[]): void => {
@@ -112,6 +112,7 @@ export function runClaude(opts: RunOptions): Promise<AgentResult> {
       if (e.type === 'system' && e.sessionId) sessionId = e.sessionId
       else if (e.type === 'tool') toolsUsed.push(e.name)
       else if (e.type === 'result') {
+        sawResult = true
         finalText = e.text
         if (e.sessionId) sessionId = e.sessionId
         costUsd = e.costUsd
@@ -132,10 +133,19 @@ export function runClaude(opts: RunOptions): Promise<AgentResult> {
       setTimeout(() => child.kill('SIGKILL'), 3000)
     }, config.requestTimeoutMs)
 
+    const onAbort = (): void => {
+      logger.warn('claude 실행 취소 — 종료', { sessionId })
+      child.kill('SIGTERM')
+      setTimeout(() => child.kill('SIGKILL'), 3000)
+    }
+    if (opts.signal?.aborted) onAbort()
+    else opts.signal?.addEventListener('abort', onAbort, { once: true })
+
     const finish = (res: AgentResult): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      opts.signal?.removeEventListener('abort', onAbort)
       resolve(res)
     }
 
@@ -162,6 +172,12 @@ export function runClaude(opts: RunOptions): Promise<AgentResult> {
       }
       if (code !== 0 && !finalText) {
         const msg = stderr.trim() || `claude 종료코드 ${code}`
+        opts.onEvent?.({ type: 'error', message: msg })
+        finish({ text: msg, sessionId, costUsd, isError: true, toolsUsed })
+        return
+      }
+      if (!sawResult) {
+        const msg = 'Claude가 응답을 완료하지 못했습니다.'
         opts.onEvent?.({ type: 'error', message: msg })
         finish({ text: msg, sessionId, costUsd, isError: true, toolsUsed })
         return

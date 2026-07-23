@@ -8,18 +8,18 @@ import type { Keychain } from '../src/core/secrets/keychain.js'
 import type { WatchpupConfig } from '../src/core/config/schema.js'
 
 const NOTION_KEY = 'MCP_NOTION_TOKEN'
-const JIRA_KEY = 'MCP_JIRA_TOKEN'
+export const JIRA_KEY = 'MCP_JIRA_TOKEN'
 
 export interface IntegrationStatus {
   notion: { connected: boolean }
-  jira: { connected: boolean; site: string; email: string }
+  jira: { connected: boolean; site: string; email: string; authenticated?: boolean; error?: string }
 }
 
 function serverById(config: WatchpupConfig, id: string) {
   return config.mcpServers.find((s) => s.id === id)
 }
 
-export async function integrationStatus(configStore: ConfigStore): Promise<IntegrationStatus> {
+export function integrationStatus(configStore: ConfigStore): IntegrationStatus {
   const c = configStore.get()
   const jira = serverById(c, 'jira')
   return {

@@ -2,23 +2,45 @@ import { app, ipcMain, Tray, nativeImage, clipboard, screen, shell, dialog, Brow
 import { join, basename } from 'node:path'
 import { existsSync, readdirSync, readFileSync, statSync, cpSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { execFile } from 'node:child_process'
 import { keychain, SecretKeys } from '../src/core/secrets/keychain.js'
 import { ConfigStore } from '../src/core/config/store.js'
 import { SessionStore } from '../src/core/session/store.js'
 import { KeyedMutex } from '../src/core/session/locks.js'
 import { Semaphore } from '../src/core/session/semaphore.js'
-import { StateStore } from '../src/core/state/store.js'
+import { StateStore, type NaggingLogEntry, type NaggingLogKind } from '../src/core/state/store.js'
 import { AuditStore } from '../src/core/observability/audit.js'
 import { MentionStore } from '../src/core/state/mentions.js'
+import { ReminderLinkStore, reminderKey } from '../src/core/state/reminder-links.js'
+import { parseSlackThreadPermalink } from '../src/core/slack/permalink.js'
+import { removeWorkLinkFromNotes, replaceWorkLinkInNotes } from '../src/core/work/links.js'
+import { buildMentionReminder, type MentionReminderLink } from '../src/core/work/mention-reminder.js'
 import { LessonStore } from '../src/core/state/lessons.js'
 import { bubbleReady as bubbleReadyText, bubbleFollowup as bubbleFollowupText, bubbleAnalyzing as bubbleAnalyzingText, type BubbleStyle } from '../src/core/presentation/bubble.js'
 import { pickIdleLine } from '../src/core/presentation/idle.js'
+import {
+  agentNaggingLine,
+  agentNaggingPending,
+  calendarEventKey,
+  calendarNaggingLine,
+  naggingLine,
+  nextNaggingDelayMs,
+  chooseNaggingSource,
+  pickCalendarNaggingEvent,
+  pickNaggingWorkItem,
+  pickSlackNewsNagging,
+  slackNewsNaggingLine,
+  type SlackNewsNaggingItem,
+} from '../src/core/presentation/nagging.js'
 import { WatchpupGateway } from '../src/core/slack/gateway.js'
+import { generateReminderDraft } from '../src/core/watchpup/pipeline.js'
+import type { ReminderDraftText } from '../src/core/agent/analysis.js'
 import { generateQuips } from '../src/core/watchpup/quips.js'
 import { parseSkillMd } from '../src/core/watchpup/skill-import.js'
 import type { Mention, PetState, AgentStreamEvent, ActivitySession } from '../src/core/types.js'
+import type { WorkItem } from '../src/core/work/types.js'
 import { CMD, EVT } from './ipc.js'
-import type { ChatSendArgs, TodoToggleArgs, SettingsPatch, TokensPatch, TokensStatus, Playbook, ActionRunArgs, ReactionSetArgs } from './ipc.js'
+import type { ChatSendArgs, TodoToggleArgs, SettingsPatch, TokensPatch, TokensStatus, Playbook, ActionRunArgs, ReactionSetArgs, MentionToWorkResult } from './ipc.js'
 import { createPetWindow, createPanelWindow } from './windows.js'
 import { petImagesFromDir, listCodexPets as listCodexPetsAt, resolveCodexPet } from './pets.js'
 import { readGlobalMcpCandidates } from './mcp-import.js'
@@ -29,11 +51,32 @@ import { LocalAgentPoller, type ActivityHistoryRange } from '../src/core/activit
 import { mergeActivities, slackActivities } from '../src/core/activity/merge.js'
 import { activityTarget } from './activity-link.js'
 import { resolveWatchpupConfigPath } from '../src/core/config/path.js'
+import { ReminderGateway } from './reminders.js'
+import { WorkStatusService } from './work-status.js'
+import { focusVisiblePanel, setPanelSwitcherVisibility } from './panel-activation.js'
+import { ClaudeModelCatalogService } from '../src/core/agent/model-catalog.js'
+import { ensureOpenAtLogin } from './login-item.js'
+import { openExternalLink } from './external-link.js'
+import { GithubPrNotificationPoller, githubPrNaggingLine } from '../src/core/github/notifications.js'
+import { BuildCompletionPoller, buildCompletionLine, type BuildTool } from '../src/core/build/completion-poller.js'
+import { WorkAgentStore } from '../src/core/workagent/store.js'
+import { WorkAgentPoller } from '../src/core/workagent/poller.js'
+import { runWorkProposal, cleanupWorkProposal, chatWorkProposal, generateBranchSlug } from '../src/core/workagent/run.js'
+import { PLAN_FILE } from '../src/core/workagent/prompt.js'
+import type { WorkProposal, WorkTaskPrefs } from '../src/core/workagent/types.js'
+import { openProposalSession, resolveWorkAgentRepo } from './work-agent.js'
+import { runWorkProposalInOrca, switchToOrcaTerminal } from './work-agent-orca.js'
+import { isGitRepo, scanGitRepos } from './repos-scan.js'
+import { startupSlackSecrets } from '../src/core/startup/access.js'
+import type { CalendarAuthorizationStatus } from './reminders.js'
 
 let pet: BrowserWindow | null = null
 let panel: BrowserWindow | null = null
 let gateway: WatchpupGateway | null = null
 let agentPoller: LocalAgentPoller | null = null
+let githubPrPoller: GithubPrNotificationPoller | null = null
+let buildCompletionPoller: BuildCompletionPoller | null = null
+let workAgentPoller: WorkAgentPoller | null = null
 let unread = 0
 let lastActivity = Date.now()
 let isQuitting = false
@@ -71,10 +114,48 @@ async function main(): Promise<void> {
   const config = configStore.get()
   bubbleStyle = config.bubbleStyle
   const mentions = new MentionStore(join(config.dataDir, 'mentions'))
+  const reminderLinks = new ReminderLinkStore(join(config.dataDir, 'reminder-links.json'))
   const sessions = new SessionStore(join(config.dataDir, 'sessions.json'), config.sessionCacheMax, config.sessionIdleMs)
   const state = new StateStore(join(config.dataDir, 'watchpup-state.json'))
   const audit = new AuditStore(join(config.dataDir, 'audit.jsonl'))
   const lessons = new LessonStore(join(config.dataDir, 'lessons.json'))
+  const reminders = new ReminderGateway()
+  const workStatus = new WorkStatusService(configStore, keychain)
+  const modelCatalog = new ClaudeModelCatalogService(join(config.dataDir, 'claude-models.json'))
+  const openExternalUrl = (url: string): void => {
+    void openExternalLink(url, {
+      openExternal: (target) => shell.openExternal(target),
+      resolveSlackTeamId: async () => {
+        await ensureSlackUserToken()
+        return gateway?.resolveTeamId() ?? null
+      },
+    }).catch((error) => logger.warn('외부 링크 열기 실패', { url, error: String(error) }))
+  }
+  let calendarAccessStatus: CalendarAuthorizationStatus | null = null
+  githubPrPoller = new GithubPrNotificationPoller(
+    () => {
+      const current = configStore.get()
+      return { enabled: current.naggingEnabled && current.githubPrNaggingEnabled }
+    },
+    (item) => state.enqueueNaggingGithubPr(item),
+  )
+  buildCompletionPoller = new BuildCompletionPoller(
+    () => {
+      const current = configStore.get()
+      return {
+        enabled: current.buildAlertsEnabled,
+        xcodeEnabled: current.xcodeBuildAlertsEnabled,
+        androidEnabled: current.androidBuildAlertsEnabled,
+      }
+    },
+    (event) => {
+      const key = `build:${event.id}`
+      if (state.seen(key)) return
+      state.markSeen(key)
+      send(pet, EVT.bubble, { text: buildCompletionLine(event), buildTool: event.tool })
+      lastActivity = Date.now()
+    },
+  )
   const deps = {
     config,
     sessions,
@@ -87,9 +168,279 @@ async function main(): Promise<void> {
     lessons,
   }
 
+  // Work 자동 제안: Work 상위 작업을 격리 worktree에서 미리 진행하고 제안. 한 번에 하나만 실행.
+  const workAgent = new WorkAgentStore(join(config.dataDir, 'work-agent.json'))
+  let workAgentBusy = false
+  let workAgentRunningId: string | null = null
+  let workAgentAbort: AbortController | null = null
+  const broadcastWorkAgent = (reminderId: string): void => {
+    broadcast(EVT.workAgentChanged, { reminderId, proposal: workAgent.proposal(reminderId) ?? null })
+  }
+  async function runWorkAgentFor(item: WorkItem, subtasks: WorkItem[], source: 'auto' | 'manual'): Promise<void> {
+    if (workAgentBusy) throw new Error('이미 다른 제안 작업이 실행 중이에요.')
+    const current = configStore.get()
+    const prefs = workAgent.prefs(item.id)
+    const provider = prefs.provider || current.workAgentProvider
+    const model = (prefs.model?.trim() || (provider === 'codex' ? current.workAgentCodexModel : current.workAgentModel)).trim()
+    const repoPath = resolveWorkAgentRepo(prefs.repo)
+    if (!repoPath) throw new Error('작업할 레포가 지정되지 않았어요. 작업 카드에서 레포를 골라주세요.')
+    workAgentBusy = true
+    workAgentRunningId = item.id
+    workAgentAbort = new AbortController()
+    const signal = workAgentAbort.signal
+    try {
+      // 재실행이면 이전 worktree를 먼저 정리
+      const previous = workAgent.proposal(item.id)
+      if (previous && previous.status !== 'running') await cleanupWorkProposal(previous)
+      let live: WorkProposal = {
+        reminderId: item.id,
+        status: 'running',
+        source,
+        provider,
+        model: model || undefined,
+        branch: '',
+        worktreePath: '',
+        repoPath,
+        startedAt: Date.now(),
+      }
+      workAgent.setProposal(live)
+      broadcastWorkAgent(item.id)
+      // 실행 중 확보되는 정보(worktree·세션 id·Orca 터미널)를 즉시 저장 — 재시작해도 세션을 찾아갈 수 있게
+      const onUpdate = (patch: Partial<WorkProposal>): void => {
+        live = { ...live, ...patch }
+        workAgent.setProposal(live)
+        broadcastWorkAgent(item.id)
+      }
+      const worktreeRoot = join(current.dataDir, 'work-worktrees')
+      // 브랜치명: 설정을 켠 경우에만 haiku로 영어 슬러그 생성 (비용 소액), 아니면 work-<id축약>
+      const slug = current.workAgentEnglishBranch ? await generateBranchSlug({ config: deps.config }, item.title) : ''
+      // Orca 모드(claude 전용): Orca가 실행 중이면 터미널에서 눈에 보이게 실행, 아니면 headless 폴백
+      let result = provider === 'claude' && current.workAgentUseOrca
+        ? await runWorkProposalInOrca({ config: deps.config }, { item, subtasks, repoPath, model, worktreeRoot, slug, source, onUpdate, signal })
+        : null
+      result ??= await runWorkProposal({ config: deps.config, keychain }, {
+        item,
+        subtasks,
+        repoPath,
+        provider,
+        model,
+        worktreeRoot,
+        slug,
+        source,
+        onUpdate,
+        signal,
+      })
+      workAgent.setProposal(result)
+      broadcastWorkAgent(item.id)
+      if (result.status === 'ready') {
+        send(pet, EVT.bubble, { text: `“${item.title}” 계획을 미리 세워봤어요. 논의해볼래요? 📝`, workItemId: item.id })
+        lastActivity = Date.now()
+      }
+    } finally {
+      workAgentBusy = false
+      workAgentRunningId = null
+      workAgentAbort = null
+    }
+  }
+  workAgentPoller = new WorkAgentPoller(
+    () => {
+      const current = configStore.get()
+      return {
+        enabled: current.workAgentEnabled,
+        listId: current.reminderListId,
+        intervalMinutes: current.workAgentIntervalMinutes,
+        sortOrder: current.reminderTaskSortOrder,
+        manualOrder: current.reminderTaskManualOrder,
+      }
+    },
+    {
+      fetchTasks: (listId) => reminders.tasks(listId, false),
+      store: {
+        proposal: (reminderId) => workAgent.proposal(reminderId),
+        prefs: (reminderId) => workAgent.prefs(reminderId),
+        // 레포가 지정되지 않은 작업(태스크별·기본 레포 모두 없음)은 자동 제안하지 않는다
+        resolveRepo: (target) => resolveWorkAgentRepo(workAgent.prefs(target.id).repo),
+      },
+      run: (target) => runWorkAgentFor(target.item, target.subtasks, 'auto'),
+    },
+  )
+
   // 렌더러가 창 로드 직후 요청하는 초기 설정 핸들러는 창을 만들기 전에 등록한다.
   // 늦게 등록하면 첫 요청이 실패한 뒤 기본 UI 값(100%)이 그대로 남을 수 있다.
   ipcMain.handle(CMD.settingsGet, () => configStore.get())
+  ipcMain.handle(CMD.modelCatalogGet, () => modelCatalog.get())
+  ipcMain.handle(CMD.modelCatalogRefresh, () => modelCatalog.refresh())
+  ipcMain.handle(CMD.naggingLogList, () => state.naggingLog())
+  ipcMain.handle(CMD.naggingLogClear, () => {
+    state.clearNaggingLog()
+    broadcast(EVT.naggingLogChanged, null)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workLists, async () => {
+    const lists = await reminders.lists()
+    const current = configStore.get()
+    const selected = current.reminderListSelectionExplicit
+      ? lists.find((list) => list.id === current.reminderListId)
+      : undefined
+    return { lists, selectedId: selected?.id ?? '' }
+  })
+  ipcMain.handle(CMD.workItems, async (_e, args: { listId?: string; includeCompleted?: boolean } = {}) => {
+    const current = configStore.get()
+    const listId = args.listId || current.reminderListId
+    if (!listId) return []
+    return reminders.tasks(listId, args.includeCompleted ?? current.showCompletedReminders)
+  })
+  ipcMain.handle(CMD.workListSelect, async (_e, listId: string) => {
+    const selected = (await reminders.lists()).find((list) => list.id === listId)
+    if (!selected) throw new Error('선택한 Reminder 목록을 찾지 못했습니다.')
+    deps.config = configStore.update({
+      reminderListId: selected.id,
+      reminderListName: selected.name,
+      reminderAccountName: selected.account,
+      reminderListSelectionExplicit: true,
+    })
+    return selected
+  })
+  ipcMain.handle(CMD.workReminderCreate, async (_e, args: { listId: string; title: string; notes?: string }) => {
+    const list = (await reminders.lists()).find((candidate) => candidate.id === args.listId)
+    if (!list) throw new Error('선택한 Reminder 목록을 찾지 못했습니다.')
+    const id = await reminders.create(list.id, args.title, args.notes)
+    return { id }
+  })
+  ipcMain.handle(CMD.workReminderSubtaskAdd, async (_e, args: { parentReminderId: string; title: string }) => {
+    const id = await reminders.addSubtask(args.parentReminderId, args.title)
+    return { id }
+  })
+  ipcMain.handle(CMD.workReminderTitleUpdate, async (_e, args: { reminderId: string; title: string }) => {
+    await reminders.updateTitle(args.reminderId, args.title)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workReminderNoteUpdate, async (_e, args: { reminderId: string; note: string }) => {
+    await reminders.updateUserNote(args.reminderId, args.note)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workReminderComplete, async (_e, args: { reminderId: string; completed: boolean }) => {
+    await reminders.setCompleted(args.reminderId, args.completed)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workReminderLinkAdd, async (_e, args: { reminderId: string; title: string; url: string }) => {
+    await reminders.appendLink(args.reminderId, args.title, args.url)
+    return { ok: true }
+  })
+  // 링크 제거·수정: notes에서 해당 링크만 바꾼다 (<note> 사용자 메모는 보존)
+  async function findWorkItemById(reminderId: string): Promise<WorkItem> {
+    const listId = configStore.get().reminderListId
+    if (!listId) throw new Error('먼저 Work 목록을 선택해주세요.')
+    const item = (await reminders.tasks(listId, true)).find((candidate) => candidate.id === reminderId)
+    if (!item) throw new Error('작업을 찾지 못했어요.')
+    return item
+  }
+  ipcMain.handle(CMD.workReminderLinkRemove, async (_e, args: { reminderId: string; url: string }) => {
+    const item = await findWorkItemById(args.reminderId)
+    const next = removeWorkLinkFromNotes(item.notes, args.url)
+    if (next === item.notes) throw new Error('메모에서 해당 링크를 찾지 못했어요.')
+    await reminders.setNotes(args.reminderId, next)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workReminderLinkUpdate, async (_e, args: { reminderId: string; url: string; title: string; newUrl: string }) => {
+    const parsed = new URL(args.newUrl)
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('http 또는 https 링크만 사용할 수 있어요.')
+    const item = await findWorkItemById(args.reminderId)
+    const title = (args.title || '').trim().replace(/[[\]]/g, '') || parsed.hostname
+    const next = replaceWorkLinkInNotes(item.notes, args.url, { title, url: parsed.toString() })
+    if (next === item.notes) throw new Error('메모에서 해당 링크를 찾지 못했어요.')
+    await reminders.setNotes(args.reminderId, next)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workItemTouch, (_e, reminderId: string) => {
+    if (typeof reminderId === 'string' && reminderId) state.touchWorkItem(reminderId)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workLinkStatus, (_e, url: string) => workStatus.status(url))
+  ipcMain.handle(CMD.workLinkAction, (_e, args: { url: string; actionId: string }) => workStatus.runAction(args.url, args.actionId))
+  ipcMain.handle(CMD.workRemindersOpen, () => shell.openPath('/System/Applications/Reminders.app'))
+  // Work 자동 제안: 조회·태스크별 설정·수동 실행·지우기·세션 열기
+  ipcMain.handle(CMD.workAgentGet, (_e, reminderId: string) => {
+    const current = configStore.get()
+    return {
+      proposal: workAgent.proposal(reminderId) ?? null,
+      prefs: workAgent.prefs(reminderId),
+      busy: workAgentBusy,
+      defaults: { provider: current.workAgentProvider, model: current.workAgentModel, codexModel: current.workAgentCodexModel },
+    }
+  })
+  ipcMain.handle(CMD.workAgentList, () => workAgent.proposals())
+  ipcMain.handle(CMD.workAgentPrefsSet, (_e, args: { reminderId: string; prefs: WorkTaskPrefs }) =>
+    workAgent.setPrefs(args.reminderId, args.prefs ?? {}))
+  ipcMain.handle(CMD.workAgentRun, async (_e, reminderId: string) => {
+    if (workAgentBusy) throw new Error('이미 다른 제안 작업이 실행 중이에요.')
+    const current = configStore.get()
+    if (!current.reminderListId) throw new Error('먼저 Work 목록을 선택해주세요.')
+    const items = await reminders.tasks(current.reminderListId, false)
+    const item = items.find((candidate) => candidate.id === reminderId)
+    if (!item) throw new Error('작업을 찾지 못했어요.')
+    if (!resolveWorkAgentRepo(workAgent.prefs(reminderId).repo)) throw new Error('작업할 레포가 지정되지 않았어요. 작업 카드에서 레포를 골라주세요.')
+    // 실행은 수 분 걸릴 수 있어 시작만 하고, 결과는 workagent.changed 이벤트로 전달한다.
+    void runWorkAgentFor(item, items.filter((candidate) => candidate.parentId === item.id), 'manual')
+      .catch((e) => console.error('workagent 수동 실행 실패', e))
+    return { ok: true }
+  })
+  // 진행 중 실행 취소: 헤드리스는 서브프로세스 종료, Orca 모드는 터미널을 닫는다.
+  // 기록은 "취소" 실패로 남아 자동 재제안되지 않는다 (재실행은 수동).
+  ipcMain.handle(CMD.workAgentCancel, (_e, reminderId: string) => {
+    if (!workAgentBusy || !workAgentAbort) throw new Error('진행 중인 실행이 없어요.')
+    if (workAgentRunningId !== reminderId) throw new Error('이 작업이 아닌 다른 작업이 실행 중이에요.')
+    workAgentAbort.abort()
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workAgentDismiss, async (_e, reminderId: string) => {
+    const proposal = workAgent.proposal(reminderId)
+    if (proposal) {
+      if (proposal.status === 'running') throw new Error('실행 중인 제안은 지울 수 없어요. 끝날 때까지 기다려주세요.')
+      await cleanupWorkProposal(proposal)
+    }
+    workAgent.removeProposal(reminderId)
+    broadcastWorkAgent(reminderId)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workAgentOpen, async (_e, reminderId: string) => {
+    const proposal = workAgent.proposal(reminderId)
+    if (!proposal) throw new Error('열 수 있는 제안이 없어요.')
+    // 실행 중에는 새 세션을 만들면 안 되므로 Orca 터미널 전환만 허용
+    if (proposal.status === 'running') {
+      if (await switchToOrcaTerminal(proposal)) return { via: 'orca' as const }
+      throw new Error('실행 중인 세션은 Orca 모드에서만 바로 열 수 있어요. 끝나면 세션 열기로 이어가주세요.')
+    }
+    return openProposalSession(proposal)
+  })
+  // 계획 본문 읽기 — worktree의 WATCHPUP-PLAN.md
+  ipcMain.handle(CMD.workAgentPlan, (_e, reminderId: string) => {
+    const proposal = workAgent.proposal(reminderId)
+    if (!proposal?.worktreePath) return { content: '' }
+    try {
+      return { content: readFileSync(join(proposal.worktreePath, PLAN_FILE), 'utf8') }
+    } catch {
+      return { content: '' }
+    }
+  })
+  // 계획 파일을 기본 앱(에디터)으로 열기 — 카드 밖에서 전문을 읽고 싶을 때
+  ipcMain.handle(CMD.workAgentPlanOpen, (_e, reminderId: string) => {
+    const proposal = workAgent.proposal(reminderId)
+    const planPath = proposal?.worktreePath ? join(proposal.worktreePath, PLAN_FILE) : ''
+    if (!planPath || !existsSync(planPath)) throw new Error('계획 파일을 찾지 못했어요.')
+    return shell.openPath(planPath)
+  })
+  // 계획 논의(채팅): 제안 세션을 resume해 이어간다. 계획 파일 수정은 카드가 다시 읽는다.
+  ipcMain.handle(CMD.workAgentChat, async (_e, args: { reminderId: string; text: string }) => {
+    const proposal = workAgent.proposal(args.reminderId)
+    if (!proposal || proposal.status !== 'ready') throw new Error('논의할 제안이 없어요.')
+    const result = await chatWorkProposal({ config: deps.config, keychain }, {
+      proposal,
+      text: String(args.text || '').trim(),
+      onEvent: (event) => broadcast(EVT.workAgentChatStream, { reminderId: args.reminderId, event }),
+    })
+    return { text: result.text }
+  })
   ipcMain.handle('pet.images.get', () => petImagesFromDir(configStore.get().petImageDir))
   ipcMain.handle('pet.codex.get', () => resolveCodexPet(configStore.get().petCodexDir))
 
@@ -123,11 +474,17 @@ async function main(): Promise<void> {
   // 2) 창 + 트레이 생성
   pet = createPetWindow(config.petAlwaysOnTop)
   panel = createPanelWindow(state.getWindowBounds('panel'))
+  setPanelSwitcherVisibility(app, false)
   panel.on('close', (event) => {
     if (isQuitting) return
     event.preventDefault()
     activePanel()?.hide()
   })
+  panel.on('hide', () => setPanelSwitcherVisibility(app, false))
+  panel.on('focus', () => acknowledgeAgentNagging())
+  // Cmd+Tab으로 Watchpup이 다시 활성화될 때 이미 열려 있는 상세 패널을 앞으로 가져온다.
+  // 숨겨진 패널은 건드리지 않아 펫 더블클릭으로만 여는 동작을 유지한다.
+  app.on('did-become-active', () => focusVisiblePanel(activePanel()))
 
 
   rememberBounds(panel, 'panel')
@@ -179,12 +536,33 @@ async function main(): Promise<void> {
     if (process.platform === 'darwin') app.dock?.setBadge('')
   }
 
+  function activatePanel(win: BrowserWindow): void {
+    setPanelSwitcherVisibility(app, true)
+    // 활성 디스플레이(커서가 있는 화면)에 없으면 그 화면 중앙으로 재배치.
+    // 이미 활성 화면에 있으면 사용자가 옮겨둔 위치를 존중해 이동하지 않는다.
+    const cursor = screen.getCursorScreenPoint()
+    const target = screen.getDisplayNearestPoint(cursor)
+    const b = win.getBounds()
+    if (screen.getDisplayMatching(b).id !== target.id) {
+      const wa = target.workArea
+      const x = Math.round(wa.x + (wa.width - b.width) / 2)
+      const y = Math.round(wa.y + (wa.height - b.height) / 2)
+      win.setBounds({ x, y, width: b.width, height: b.height })
+    }
+    // 패널은 생성 시 setVisibleOnAllWorkspaces(true)로 모든 Space에 소속돼 있어,
+    // 어느 Space에서 열어도 현재 Space에 그대로 뜬다(원래 Space로 전환되지 않음).
+    if (!win.isVisible()) win.show()
+    else win.moveTop()
+    // BrowserWindow.focus()만 호출하면 비활성 NSPanel인 펫에서 열었을 때
+    // macOS 앱 자체는 비활성 상태로 남을 수 있다.
+    if (process.platform === 'darwin') app.focus({ steal: true })
+    win.focus()
+  }
+
   function showPanelHome(): void {
     const win = activePanel()
     if (!win) return
-    if (!win.isVisible()) win.show()
-    win.focus()
-    send(win, 'panel.shown', {}) // 열 때 항상 멘션 목록부터(직전 설정 탭 잔상 방지)
+    activatePanel(win)
     clearPanelBadge()
   }
 
@@ -198,8 +576,8 @@ async function main(): Promise<void> {
   function openActivityPanel(id: string): void {
     const win = activePanel()
     if (!win) return
-    if (!win.isVisible()) win.show()
-    win.focus()
+    acknowledgeAgentNagging()
+    activatePanel(win)
     clearPanelBadge()
     send(win, 'activity.focus', id)
   }
@@ -212,13 +590,18 @@ async function main(): Promise<void> {
     const win = activePanel()
     if (!win || typeof id !== 'string' || !id) return
     if (!win.isVisible()) {
-      win.show()
       clearPanelBadge()
     }
-    win.focus()
+    activatePanel(win)
     send(win, 'mention.focus', id)
   }
   ipcMain.on('pet.openMention', (_e, id: string) => openMentionPanel(id))
+  ipcMain.on('pet.openWorkItem', (_e, id: string) => {
+    const win = activePanel()
+    if (!win || typeof id !== 'string' || !id) return
+    activatePanel(win)
+    send(win, 'work.focus', id)
+  })
   ipcMain.handle(CMD.activityList, (_e, requestedRange?: ActivityHistoryRange) => {
     const range: ActivityHistoryRange = ['recent', 'today', '7d', 'all'].includes(requestedRange || '')
       ? requestedRange as ActivityHistoryRange
@@ -235,20 +618,35 @@ async function main(): Promise<void> {
   ipcMain.on('activity.open', (_e, id: string) => {
     const target = activityTarget(id)
     if (!target) return
+    acknowledgeAgentNagging()
     if (target.kind === 'external') {
-      void shell.openExternal(target.url)
+      openExternalUrl(target.url)
     } else {
       const mention = mentions.get(target.id)
-      if (mention?.permalink) void shell.openExternal(mention.permalink)
+      if (mention?.permalink) openExternalUrl(mention.permalink)
       else openMentionPanel(target.id)
     }
   })
   ipcMain.on('pet.setMouseIgnore', (_e, ignore: boolean) => {
     if (pet) pet.setIgnoreMouseEvents(!!ignore, { forward: true })
   })
-  // permalink 등 외부 링크는 기본 브라우저로 (창 네비게이션 방지)
+  ipcMain.on('pet.openCalendar', () => {
+    void shell.openPath('/System/Applications/Calendar.app')
+  })
+  ipcMain.on('calendar.privacy.open', () => {
+    void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars')
+  })
+  ipcMain.handle(CMD.calendarAccessRequest, async () => {
+    calendarAccessStatus = await reminders.requestCalendarAccess()
+    return calendarAccessStatus
+  })
+  ipcMain.on('build.tool.open', (_e, tool: BuildTool) => {
+    const bundleId = tool === 'xcode' ? 'com.apple.dt.Xcode' : tool === 'android' ? 'com.google.android.studio' : ''
+    if (bundleId) execFile('/usr/bin/open', ['-b', bundleId], () => {})
+  })
+  // Slack permalink는 데스크톱 앱으로, 나머지는 기본 외부 앱으로 연다(창 네비게이션 방지).
   ipcMain.on('open.external', (_e, url: string) => {
-    if (typeof url === 'string' && /^https?:\/\//.test(url)) void shell.openExternal(url)
+    if (typeof url === 'string' && /^https?:\/\//.test(url)) openExternalUrl(url)
   })
 
   // 맥 스타일 창 컨트롤 (프레임리스 → 커스텀 신호등)
@@ -268,7 +666,11 @@ async function main(): Promise<void> {
   ipcMain.handle('mention.remove', (_e, id: string) => {
     gateway?.removeMention(id)
   })
-  ipcMain.handle('mention.cleanupFalse', () => (gateway ? gateway.cleanupFalseMentions() : Promise.resolve({ removed: 0, checked: 0 })))
+  ipcMain.handle('mention.cleanupFalse', async () => {
+    if (!gateway) return { removed: 0, checked: 0 }
+    await ensureSlackUserToken()
+    return gateway.cleanupFalseMentions()
+  })
   ipcMain.handle('mention.setCategory', (_e, a: { mentionId: string; category: string }) => {
     gateway?.setCategory(a.mentionId, a.category)
   })
@@ -334,21 +736,33 @@ async function main(): Promise<void> {
     }
   })
   // 스레드 대화 즉석 조회(예전 멘션은 thread가 없을 수 있음)
-  ipcMain.handle('thread.get', (_e, id: string, refresh = false) =>
-    gateway ? gateway.getThread(id, !!refresh) : Promise.resolve([]),
-  )
+  ipcMain.handle('thread.get', async (_e, id: string, refresh = false) => {
+    if (!gateway) return []
+    if (refresh) await ensureSlackUserToken()
+    return gateway.getThread(id, !!refresh)
+  })
 
   // 코드 레포: 목록·추가(폴더 선택)·삭제 — 코드 원인 조사에 사용(claude --add-dir)
   ipcMain.handle('repos.list', () => configStore.get().repos)
+  // 폴더 선택: git 레포면 바로 등록, 레포들을 모아둔 상위 폴더면 하위 레포 후보를 돌려줘 선택 등록
   ipcMain.handle('repos.add', async () => {
     const r = await dialog.showOpenDialog({ properties: ['openDirectory'] })
-    if (r.canceled || !r.filePaths[0]) return configStore.get().repos
-    const path = r.filePaths[0]
-    const cur = configStore.get().repos
-    const next = cur.includes(path) ? cur : [...cur, path]
-    const c = configStore.update({ repos: next })
-    deps.config = c
-    return c.repos
+    if (r.canceled || !r.filePaths[0]) return null
+    const dir = r.filePaths[0]
+    if (isGitRepo(dir)) {
+      const cur = configStore.get().repos
+      const next = cur.includes(dir) ? cur : [...cur, dir]
+      deps.config = configStore.update({ repos: next })
+      return { repos: deps.config.repos }
+    }
+    return { candidates: scanGitRepos(dir, configStore.get().repos), dir }
+  })
+  ipcMain.handle('repos.addMany', (_e, paths: string[]) => {
+    const valid = (Array.isArray(paths) ? paths : []).filter((path) => typeof path === 'string' && isGitRepo(path))
+    const next = [...configStore.get().repos]
+    for (const path of valid) if (!next.includes(path)) next.push(path)
+    deps.config = configStore.update({ repos: next })
+    return deps.config.repos
   })
   ipcMain.handle('repos.addGithub', async (_e, spec: string) => {
     try {
@@ -375,6 +789,7 @@ async function main(): Promise<void> {
     if (!gateway) return { error: '먼저 슬랙 연결이 필요합니다 (재시작 후).' }
     if (!cfg.mySlackUserId) return { error: 'mySlackUserId 를 먼저 저장하세요.' }
     try {
+      await ensureSlackUserToken()
       const found = await gateway.researchGroups(cfg.mySlackUserId)
       const myGroups = found.map((g) => ({ id: g.id, handle: g.handle }))
       const c = configStore.update({ myGroups })
@@ -406,7 +821,7 @@ async function main(): Promise<void> {
     const requestedWidth = typeof value === 'number' ? b.width : value?.width
     if (typeof requestedHeight !== 'number' || typeof requestedWidth !== 'number') return
     const workArea = screen.getDisplayMatching(b).workArea
-    const h = Math.max(164, Math.min(800, Math.round(requestedHeight)))
+    const h = Math.max(164, Math.min(workArea.height, 1200, Math.round(requestedHeight)))
     const w = Math.max(340, Math.min(workArea.width, 860, Math.round(requestedWidth)))
     if (h === b.height && w === b.width) return
     const bottom = b.y + b.height
@@ -465,9 +880,36 @@ async function main(): Promise<void> {
     broadcast('mentions.refresh', null)
     broadcastActivities()
   })
+  gateway.on('slack:news', (item: SlackNewsNaggingItem) => {
+    state.enqueueNaggingSlackNews(item)
+  })
 
+  const agentBatchIds = new Set<string>()
   agentPoller = new LocalAgentPoller()
   agentPoller.on('snapshot', (activities: ActivitySession[]) => {
+    const running = activities.filter((activity) => activity.state === 'running')
+    if (running.length) {
+      for (const activity of running) agentBatchIds.add(activity.id)
+      const pending = state.get().nagging?.agent
+      if (pending && running.some((activity) => activity.id === pending.activityId && activity.messages?.at(-1)?.role === 'user')) {
+        acknowledgeAgentNagging()
+      }
+    } else if (agentBatchIds.size) {
+      const current = configStore.get()
+      const dueAt = Date.now() + Math.max(1, current.naggingMinMinutes) * 60_000
+      const pending = agentNaggingPending(agentBatchIds, activities, dueAt)
+      const previous = state.get().nagging?.agent
+      if (pending && current.naggingEnabled && !activePanel()?.isFocused()) {
+        state.setNaggingAgent(previous ? {
+          ...pending,
+          count: previous.count + pending.count,
+          dueAt: Math.min(previous.dueAt, pending.dueAt),
+          repeatCount: previous.repeatCount,
+          waiting: previous.waiting || pending.waiting,
+        } : pending)
+      }
+      agentBatchIds.clear()
+    }
     localActivities = activities
     broadcastActivities()
   })
@@ -495,6 +937,7 @@ async function main(): Promise<void> {
   refillQuips() // 시작 시 한 배치 미리 생성
   setInterval(() => {
     if (!pet || pet.isDestroyed()) return
+    if (configStore.get().naggingEnabled) return
     if (activePanel()?.isVisible()) return
     if (Date.now() - lastActivity < IDLE_MS) return
     refillQuips() // 캐시 보충(비동기)
@@ -502,10 +945,136 @@ async function main(): Promise<void> {
     lastActivity = Date.now() // 다음 혼잣말까지 간격 확보
   }, 4 * 60 * 1000)
 
+  // 베타 `잔소리`: 캘린더 임박 일정 → 확인하지 않은 Agent 완료 → GitHub PR/Slack 소식/Work 순서로 상기한다.
+  // 다음 예정 시각과 이미 알린 대상을 저장해 앱 재실행 뒤에도 중복 알림을 피한다.
+  let naggingTimer: NodeJS.Timeout | null = null
+  let priorityNaggingBusy = false
+  let calendarRetryAt = 0
+
+  function showNagging(kind: NaggingLogKind, text: string, payload: Record<string, unknown>, context?: string): void {
+    const entry: NaggingLogEntry = { at: Date.now(), kind, text, ...(context ? { context } : {}) }
+    state.appendNaggingLog(entry)
+    send(pet, EVT.bubble, { text, ...payload })
+    broadcast(EVT.naggingLogChanged, entry)
+  }
+
+  function acknowledgeAgentNagging(): void {
+    if (state.get().nagging?.agent) state.setNaggingAgent(undefined)
+  }
+
+  function scheduleNagging(reset = false): void {
+    if (naggingTimer) clearTimeout(naggingTimer)
+    naggingTimer = null
+    const current = configStore.get()
+    if (!current.naggingEnabled) {
+      state.setNagging({ nextAt: undefined })
+      acknowledgeAgentNagging()
+      return
+    }
+    const now = Date.now()
+    const savedNextAt = reset ? undefined : state.get().nagging?.nextAt
+    const nextAt = savedNextAt && savedNextAt > now
+      ? savedNextAt
+      : now + nextNaggingDelayMs(current.naggingMinMinutes, current.naggingMaxMinutes)
+    state.setNagging({ nextAt })
+    naggingTimer = setTimeout(() => { void runNagging() }, Math.max(1000, nextAt - now))
+  }
+
+  async function runPriorityNagging(): Promise<boolean> {
+    if (priorityNaggingBusy || !configStore.get().naggingEnabled || !pet || pet.isDestroyed()) return false
+    priorityNaggingBusy = true
+    try {
+      const now = Date.now()
+      if (now >= calendarRetryAt) {
+        try {
+          calendarAccessStatus ??= await reminders.calendarAuthorizationStatus()
+          if (calendarAccessStatus === 'authorized') {
+            const events = await reminders.upcomingEvents(now - 60_000, now + 6 * 60_000)
+            const event = pickCalendarNaggingEvent(events, state.naggingCalendarNotified(), now)
+            if (event) {
+              state.markNaggingCalendar(calendarEventKey(event), now)
+              showNagging('calendar', calendarNaggingLine(event, now), { calendarEvent: true }, event.title)
+              lastActivity = now
+              return true
+            }
+          }
+        } catch (error) {
+          calendarRetryAt = now + 15 * 60_000
+          console.warn('잔소리 캘린더 조회 실패', error)
+        }
+      }
+
+      const pending = state.get().nagging?.agent
+      if (pending && pending.dueAt <= now) {
+        showNagging('agent', agentNaggingLine(pending), { activityId: pending.activityId }, pending.title)
+        state.setNaggingAgent({
+          ...pending,
+          dueAt: now + nextNaggingDelayMs(configStore.get().naggingMinMinutes, configStore.get().naggingMaxMinutes),
+          repeatCount: pending.repeatCount + 1,
+        })
+        lastActivity = now
+        return true
+      }
+      return false
+    } finally {
+      priorityNaggingBusy = false
+    }
+  }
+
+  async function runNagging(): Promise<void> {
+    try {
+      const current = configStore.get()
+      if (!current.naggingEnabled || !pet || pet.isDestroyed()) return
+      if (await runPriorityNagging()) return
+      const items = current.reminderListId
+        ? await reminders.tasks(current.reminderListId, false).catch((error) => {
+          console.warn('잔소리 Work 작업 조회 실패', error)
+          return []
+        })
+        : []
+      if (!configStore.get().naggingEnabled) return
+      const item = pickNaggingWorkItem(items, state.workTouchedAt(), state.naggingRecentTaskIds())
+      const news = current.slackNewsEnabled ? pickSlackNewsNagging(state.naggingSlackNews()) : null
+      const githubPr = current.githubPrNaggingEnabled ? state.naggingGithubPr()[0] ?? null : null
+      const source = chooseNaggingSource(!!item, !!news, !!githubPr)
+      if (source === 'github' && githubPr) {
+        state.dismissNaggingGithubPr(githubPr.id)
+        showNagging('github', githubPrNaggingLine(githubPr), { externalUrl: githubPr.url }, `${githubPr.repository} #${githubPr.number}`)
+        lastActivity = Date.now()
+        return
+      }
+      if (source === 'slack' && news) {
+        state.dismissNaggingSlackNews(news.id)
+        showNagging('slack', slackNewsNaggingLine(news), { externalUrl: news.permalink }, `#${news.channelName}`)
+        lastActivity = Date.now()
+        return
+      }
+      if (source === 'work' && item) {
+        state.rememberNaggingTask(item.id)
+        showNagging('work', naggingLine(item), { workItemId: item.id }, item.title)
+      } else {
+        showNagging('general', naggingLine(null), {})
+      }
+      lastActivity = Date.now()
+    } catch (error) {
+      console.warn('잔소리 작업 조회 실패', error)
+    } finally {
+      scheduleNagging(true)
+    }
+  }
+
+  scheduleNagging()
+  githubPrPoller.start()
+  buildCompletionPoller.start()
+  workAgentPoller.start()
+  setInterval(() => { void runPriorityNagging() }, 30_000)
+  setTimeout(() => { void runPriorityNagging() }, 2_000)
+
   // 4) 감지원 부착: 봇(소켓) / 내 계정 검색 폴링 — config 플래그 + 토큰 존재 시
-  const botToken = await keychain.get(SecretKeys.slackBotToken)
-  const appToken = await keychain.get(SecretKeys.slackAppToken)
-  const userToken = await keychain.get(SecretKeys.slackUserToken)
+  const startupSecrets = startupSlackSecrets(config)
+  const botToken = startupSecrets.bot ? await keychain.get(SecretKeys.slackBotToken) : null
+  const appToken = startupSecrets.app ? await keychain.get(SecretKeys.slackAppToken) : null
+  let userToken = startupSecrets.user ? await keychain.get(SecretKeys.slackUserToken) : null
   if (userToken) gateway.attachUserToken(userToken)
   if (config.enableBot && botToken && appToken) {
     try {
@@ -518,6 +1087,13 @@ async function main(): Promise<void> {
     gateway.attachUserSearch(userToken, config.mySlackUserId, config.searchIntervalSec)
   }
 
+  async function ensureSlackUserToken(): Promise<string | null> {
+    if (userToken) return userToken
+    userToken = await keychain.get(SecretKeys.slackUserToken)
+    if (userToken) gateway?.attachUserToken(userToken)
+    return userToken
+  }
+
   // 5) 명령 핸들러 (gateway 생성 이후 등록; gateway가 null이면 안전하게 무동작/기본값 반환)
   ipcMain.handle(CMD.mentionsList, () => mentions.all())
   ipcMain.handle(CMD.mentionGet, (_e, id: string) => mentions.get(id) ?? null)
@@ -525,25 +1101,169 @@ async function main(): Promise<void> {
     mentions.markRead(id)
     broadcastActivities()
   })
-  ipcMain.handle(CMD.threadImport, (_e, permalink: string) => {
+  // 이 멘션 스레드에 매핑된 Reminder가 아직 살아있으면 id 반환, 아니면 null(외부 삭제 대비 재검증)
+  ipcMain.handle(CMD.mentionReminderLink, async (_e, mentionId: string): Promise<string | null> => {
+    const mention = mentions.get(mentionId)
+    if (!mention) return null
+    const current = configStore.get()
+    const listId = current.reminderListId
+    if (!listId) return null
+    const key = reminderKey(mention.channel, mention.threadTs)
+    let tasks: WorkItem[]
+    try {
+      tasks = await reminders.tasks(listId, true)
+    } catch (e) {
+      console.error('mention.reminder.link 조회 실패', e)
+      return null
+    }
+    // 1차: 로컬 매핑(reminder-links.json) fast path
+    const candidate = reminderLinks.get(key)
+    if (candidate && candidate.listId === listId && tasks.some((t) => t.id === candidate.reminderId)) {
+      return candidate.reminderId
+    }
+    // 2차: 로컬 매핑이 없거나 stale이면 미리알림 notes의 슬랙 링크를 파싱해 매칭 (기존/외부 생성 TODO 대비)
+    for (const t of tasks) {
+      for (const link of t.links) {
+        if (link.kind !== 'slack') continue
+        let target
+        try {
+          target = parseSlackThreadPermalink(link.url)
+        } catch {
+          continue
+        }
+        if (target.channel === mention.channel.toUpperCase() && target.threadTs === mention.threadTs) {
+          reminderLinks.set(key, { reminderId: t.id, listId })
+          return t.id
+        }
+      }
+    }
+    if (candidate) reminderLinks.delete(key)
+    return null
+  })
+  // 멘션 스레드 → Reminder 생성/갱신 공용 로직: 같은 스레드에 이미 매핑된 Reminder가
+  // 살아있으면(같은 목록 소속 + 아직 존재) 새로 만들지 않고 링크·서브태스크·마감일만 갱신한다.
+  async function upsertMentionReminder(input: {
+    mention: Mention
+    listId: string
+    title: string
+    notes: string
+    links: MentionReminderLink[]
+    subtasks: string[]
+    dueAt?: number
+  }): Promise<MentionToWorkResult> {
+    const { mention, listId, title, notes, links, subtasks, dueAt } = input
+    const key = reminderKey(mention.channel, mention.threadTs)
+    const candidate = reminderLinks.get(key)
+    let existingId: string | undefined
+    let existingTasks: WorkItem[] | undefined
+    if (candidate && candidate.listId === listId) {
+      try {
+        existingTasks = await reminders.tasks(listId, true)
+        if (existingTasks.some((t) => t.id === candidate.reminderId)) existingId = candidate.reminderId
+      } catch (e) {
+        console.error('reminders.tasks 조회 실패', e)
+      }
+    }
+    if (existingId) {
+      for (const link of links) await reminders.appendLink(existingId, link.title, link.url)
+      const existingChildTitles = new Set(
+        (existingTasks ?? []).filter((t) => t.parentId === existingId).map((t) => t.title),
+      )
+      for (const sub of subtasks) {
+        if (!existingChildTitles.has(sub)) await reminders.addSubtask(existingId, sub)
+      }
+      if (typeof dueAt === 'number' && Number.isFinite(dueAt) && dueAt > 0) {
+        await reminders.setDue(existingId, dueAt)
+      }
+      broadcast('work.focus', existingId)
+      return { ok: true, id: existingId, updated: true }
+    }
+    const id = await reminders.create(listId, title, notes, dueAt)
+    reminderLinks.set(key, { reminderId: id, listId })
+    for (const link of links) await reminders.appendLink(id, link.title, link.url)
+    for (const sub of subtasks) await reminders.addSubtask(id, sub)
+    broadcast('work.focus', id)
+    return { ok: true, id }
+  }
+  // 멘션 → work(Reminder) 변환: 목록 미선택이면 생성하지 않고 work 탭 전환만 안내
+  ipcMain.handle(CMD.mentionToWork, async (_e, mentionId: string, dueAt?: number): Promise<MentionToWorkResult> => {
+    const mention = mentions.get(mentionId)
+    if (!mention) throw new Error('멘션을 찾지 못했습니다.')
+    const current = configStore.get()
+    if (!current.reminderListSelectionExplicit || !current.reminderListId) {
+      broadcast('work.focus', 'no-list')
+      return { ok: false, reason: 'no-list' }
+    }
+    const { title, notes, links, subtasks } = buildMentionReminder(mention)
+    return upsertMentionReminder({
+      mention,
+      listId: current.reminderListId,
+      title,
+      notes,
+      links,
+      subtasks,
+      dueAt: typeof dueAt === 'number' && Number.isFinite(dueAt) && dueAt > 0 ? dueAt : undefined,
+    })
+  })
+  // 멘션 → work(Reminder) 변환(LLM 생성): 스레드 내용을 claude로 요약해 초안 생성.
+  // LLM 결과가 비면 buildMentionReminder(고정 템플릿)로 필드별 폴백. 링크는 항상 템플릿 규칙 그대로.
+  ipcMain.handle(CMD.mentionToWorkAI, async (_e, mentionId: string, extra?: string, dueAt?: number): Promise<MentionToWorkResult> => {
+    const mention = mentions.get(mentionId)
+    if (!mention) throw new Error('멘션을 찾지 못했습니다.')
+    const current = configStore.get()
+    if (!current.reminderListSelectionExplicit || !current.reminderListId) {
+      broadcast('work.focus', 'no-list')
+      return { ok: false, reason: 'no-list' }
+    }
+    const fallback = buildMentionReminder(mention)
+    let draft: ReminderDraftText = { title: '', notes: '', subtasks: [] }
+    try {
+      draft = await generateReminderDraft({ config: deps.config, sessions, keychain, lessons }, { mention, extra })
+    } catch (e) {
+      console.error('generateReminderDraft 실패', e)
+    }
+    const title = draft.title.trim() || fallback.title
+    const notes = draft.notes.trim() ? `<note>${draft.notes.trim()}</note>` : fallback.notes
+    const subtasks = draft.subtasks.length ? draft.subtasks : fallback.subtasks
+    const userDueAt = typeof dueAt === 'number' && Number.isFinite(dueAt) && dueAt > 0 ? dueAt : undefined
+    const llmDueAt = typeof draft.dueAt === 'number' && Number.isFinite(draft.dueAt) && draft.dueAt > 0 ? draft.dueAt : undefined
+    return upsertMentionReminder({
+      mention,
+      listId: current.reminderListId,
+      title,
+      notes,
+      links: fallback.links,
+      subtasks,
+      dueAt: userDueAt ?? llmDueAt,
+    })
+  })
+  ipcMain.handle(CMD.threadImport, async (_e, permalink: string) => {
     if (!gateway) return Promise.reject(new Error('Slack 연결을 초기화하지 못했습니다.'))
+    await ensureSlackUserToken()
     return gateway.importThread(permalink)
   })
   ipcMain.handle(CMD.todoToggle, (_e, a: TodoToggleArgs) => {
     gateway?.toggleTodo(a.mentionId, a.index)
   })
-  ipcMain.handle(CMD.replyApprove, (_e, id: string) => (gateway ? gateway.approveReply(id) : Promise.resolve({ ts: null })))
-  ipcMain.handle(CMD.reactionSet, (_e, a: ReactionSetArgs) =>
-    gateway ? gateway.setReaction(a.mentionId, a.messageTs, a.name, a.active) : Promise.resolve({ thread: [] }),
-  )
+  ipcMain.handle(CMD.replyApprove, async (_e, id: string) => {
+    if (!gateway) return { ts: null }
+    await ensureSlackUserToken()
+    return gateway.approveReply(id)
+  })
+  ipcMain.handle(CMD.reactionSet, async (_e, a: ReactionSetArgs) => {
+    if (!gateway) return { thread: [] }
+    await ensureSlackUserToken()
+    return gateway.setReaction(a.mentionId, a.messageTs, a.name, a.active)
+  })
   ipcMain.handle('dev.run', (_e, a: { mentionId: string; repoPaths: string[]; extraContext: string }) => {
     if (!gateway) return Promise.resolve()
     send(pet, EVT.chatBubble, { type: 'start' })
     return gateway.runDev(a.mentionId, a.repoPaths || [], a.extraContext || '')
   })
-  ipcMain.handle('reply.rewrite', (_e, a: { mentionId: string; style: string }) =>
-    gateway ? gateway.rewriteDraft(a.mentionId, a.style as never) : Promise.resolve({ text: '' }),
-  )
+  ipcMain.handle('reply.rewrite', async (_e, a: { mentionId: string; style: string }) => {
+    if (!gateway) return { text: '' }
+    return gateway.rewriteDraft(a.mentionId, a.style as never)
+  })
   // 자가발전: 사용자 피드백 반영(→ 교훈 축적 + 즉시 재분석) / 교훈 목록·삭제
   ipcMain.handle('feedback.send', (_e, a: { mentionId: string; text: string }) =>
     gateway ? gateway.feedback(a.mentionId, a.text || '') : Promise.resolve({ lesson: null }),
@@ -574,6 +1294,9 @@ async function main(): Promise<void> {
   })
   ipcMain.handle(CMD.settingsSet, (_e, patch: SettingsPatch) => {
     const current = configStore.get()
+    const slackNewsChanged = ('slackNewsEnabled' in patch && patch.slackNewsEnabled !== current.slackNewsEnabled)
+      || ('slackNewsChannels' in patch && JSON.stringify(patch.slackNewsChannels) !== JSON.stringify(current.slackNewsChannels))
+      || ('slackNewsKeywords' in patch && JSON.stringify(patch.slackNewsKeywords) !== JSON.stringify(current.slackNewsKeywords))
     const merged = {
       ...patch,
       obsidian: { ...current.obsidian, ...(patch.obsidian ?? {}) },
@@ -585,12 +1308,31 @@ async function main(): Promise<void> {
     send(pet, EVT.petTheme, c.petTheme)
     send(pet, EVT.petSize, c.petSizePercent)
     send(pet, EVT.bubbleSize, c.bubbleSizePercent)
+    send(pet, EVT.bubbleStackCount, c.bubbleStackCount)
+    send(pet, EVT.bubbleDuration, c.bubbleDurationSeconds)
     send(pet, EVT.hudSize, c.hudSizePercent)
     send(pet, EVT.hudAlignment, c.hudAlignment)
     send(pet, EVT.hudVisibility, c.showActivityHud)
     send(pet, EVT.petImages, petImagesFromDir(c.petImageDir))
     send(pet, EVT.petCodex, resolveCodexPet(c.petCodexDir))
     if (pet && !pet.isDestroyed()) pet.setAlwaysOnTop(c.petAlwaysOnTop) // 즉시 반영
+    if ('naggingEnabled' in patch || 'naggingMinMinutes' in patch || 'naggingMaxMinutes' in patch || 'githubPrNaggingEnabled' in patch || 'slackNewsEnabled' in patch) {
+      scheduleNagging(true)
+      if (c.naggingEnabled) void runPriorityNagging()
+    }
+    if ('naggingEnabled' in patch || 'githubPrNaggingEnabled' in patch) {
+      if (!c.naggingEnabled || !c.githubPrNaggingEnabled) state.clearNaggingGithubPr()
+      else void githubPrPoller?.pollNow()
+    }
+    if ('buildAlertsEnabled' in patch || 'xcodeBuildAlertsEnabled' in patch || 'androidBuildAlertsEnabled' in patch) {
+      void buildCompletionPoller?.pollNow()
+    }
+    if ('naggingEnabled' in patch || 'slackNewsEnabled' in patch || 'slackNewsChannels' in patch || 'slackNewsKeywords' in patch) {
+      if (slackNewsChanged) state.clearNaggingSlackNews()
+      void gateway?.refreshSlackNews()
+    }
+    // Work 자동 제안을 켜면 바로 한 번 후보를 확인한다
+    if ('workAgentEnabled' in patch && c.workAgentEnabled) void workAgentPoller?.pollNow(true)
   })
   // 토큰: 존재 여부만 조회 / 값 저장은 Keychain에만 (설정 변경은 재시작 후 반영)
   ipcMain.handle(CMD.tokensGet, async (): Promise<TokensStatus> => ({
@@ -636,19 +1378,26 @@ async function main(): Promise<void> {
     return readGlobalMcpCandidates().map((c) => ({ ...c, already: existing.has(c.id) }))
   })
   // 간편 연동 (노션·지라) — 토큰 Keychain 저장 + MCP 서버 자동 구성
-  ipcMain.handle('integration.status', () => integrationStatus(configStore))
+  ipcMain.handle('integration.status', async (_e, verify = false) => {
+    const status = await integrationStatus(configStore)
+    if (!verify || !status.jira.connected) return status
+    const auth = await workStatus.jiraConnectionStatus()
+    return { ...status, jira: { ...status.jira, ...auth } }
+  })
   ipcMain.handle('integration.connectNotion', async (_e, token: string) => {
     deps.config = await connectNotion(configStore, keychain, token || '')
   })
   ipcMain.handle('integration.connectJira', async (_e, a: { site: string; email: string; token: string }) => {
     deps.config = await connectJira(configStore, keychain, { site: a.site || '', email: a.email || '', token: a.token || '' })
+    workStatus.resetJiraAuth()
   })
   ipcMain.handle('integration.disconnect', (_e, id: 'notion' | 'jira') => {
     deps.config = disconnectIntegration(configStore, id)
+    if (id === 'jira') workStatus.resetJiraAuth()
   })
 
-  // 6) 감지원이 하나라도 붙었고 mySlackUserId가 있으면 기동
-  if (gateway.hasSource() && config.mySlackUserId) {
+  // 6) 일반 감지는 mySlackUserId, Slack 소식 구독은 User Token만 있어도 기동
+  if (gateway.hasSource() && (config.mySlackUserId || !!userToken)) {
     try {
       await gateway.start()
       // 예전 멘션의 채널 라벨(raw ID → DM/#채널) 일괄 갱신 후 열린 목록 새로고침
@@ -661,18 +1410,24 @@ async function main(): Promise<void> {
   } else {
     const missing: string[] = []
     if (!gateway.hasSource()) missing.push('슬랙 연결(봇 토큰 또는 User Token)')
-    if (!config.mySlackUserId) missing.push('mySlackUserId')
+    if (!config.mySlackUserId && !userToken) missing.push('mySlackUserId')
     console.warn(`미설정 — Slack 감시 대기 중: ${missing.join(', ')}. 설정 탭에서 저장 후 앱 재시작.`)
   }
 }
 
-app.whenReady().then(main)
+app.whenReady().then(() => {
+  ensureOpenAtLogin(app)
+  return main()
+})
 app.on('window-all-closed', () => {
   /* 트레이 상주: macOS에서 유지 */
 })
 app.on('before-quit', () => {
   isQuitting = true
   agentPoller?.stop()
+  githubPrPoller?.stop()
+  buildCompletionPoller?.stop()
+  workAgentPoller?.stop()
   gateway?.stop().catch(() => {})
 })
 

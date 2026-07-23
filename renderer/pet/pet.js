@@ -1,12 +1,13 @@
 import { activityStateLabel, formatElapsed } from './activity-format.js'
-import { bubbleSurfaceState, hudFoldContent } from './bubble-surface.js'
+import { bubbleOpenTarget, bubbleSurfaceState, hudFoldContent } from './bubble-surface.js'
+import { bubbleEntriesToRemove, clampBubbleDurationSeconds, clampBubbleStackCount } from './bubble-stack.js'
 
 const pet = document.getElementById('pet')
 const petImg = document.getElementById('pet-img')
 const petSprite = document.getElementById('pet-sprite')
 const face = pet.querySelector('.face')
 const badge = document.getElementById('badge')
-const bubble = document.getElementById('bubble')
+const bubbleStack = document.getElementById('bubble-stack')
 const activityHud = document.getElementById('activity-hud')
 const hudFold = document.getElementById('hud-fold')
 const hudFoldCount = document.getElementById('hud-fold-count')
@@ -24,7 +25,9 @@ let codex = null // { spritesheet, displayName } | null (설정 시 gif/이모�
 let currentState = 'idle'
 let petSizePercent = 100
 let bubbleSizePercent = 100
-let currentBubbleText = ''
+let bubbleStackCount = 3
+let bubbleDurationSeconds = 10
+let bubbleEntries = []
 let hudSizePercent = 100
 let hudAlignment = 'right'
 let showActivityHud = true
@@ -189,8 +192,21 @@ function setBubbleSize(value) {
   root.setProperty('--bubble-font-size', `${fontSize}px`)
   root.setProperty('--bubble-line-height', `${lineHeight}px`)
   root.setProperty('--bubble-max-height', `${Math.ceil(lineHeight * 4 + paddingY * 2 + 2)}px`)
-  if (currentBubbleText && !bubble.classList.contains('hidden')) renderBubbleText(currentBubbleText)
+  for (const entry of bubbleEntries) renderBubbleText(entry, entry.text)
   syncSize()
+}
+
+function setBubbleStackCount(value) {
+  bubbleStackCount = clampBubbleStackCount(value)
+  pruneBubbleStack()
+  renderBubbleSurface()
+}
+
+function setBubbleDuration(value) {
+  bubbleDurationSeconds = clampBubbleDurationSeconds(value)
+  for (const entry of bubbleEntries) {
+    if (!entry.persistent) scheduleBubbleRemoval(entry)
+  }
 }
 
 function setHudSize(value) {
@@ -261,6 +277,8 @@ window.watchpup.settingsGet().then((cfg) => {
   setTheme(cfg?.petTheme)
   setPetSize(cfg?.petSizePercent)
   setBubbleSize(cfg?.bubbleSizePercent)
+  setBubbleStackCount(cfg?.bubbleStackCount)
+  setBubbleDuration(cfg?.bubbleDurationSeconds)
   setHudSize(cfg?.hudSizePercent)
   setHudAlignment(cfg?.hudAlignment)
   setHudVisibility(cfg?.showActivityHud)
@@ -272,6 +290,8 @@ if (window.watchpup.onPetImages) window.watchpup.onPetImages(setImages)
 if (window.watchpup.onPetCodex) window.watchpup.onPetCodex(setCodex)
 if (window.watchpup.onPetSize) window.watchpup.onPetSize(setPetSize)
 if (window.watchpup.onBubbleSize) window.watchpup.onBubbleSize(setBubbleSize)
+if (window.watchpup.onBubbleStackCount) window.watchpup.onBubbleStackCount(setBubbleStackCount)
+if (window.watchpup.onBubbleDuration) window.watchpup.onBubbleDuration(setBubbleDuration)
 if (window.watchpup.onHudSize) window.watchpup.onHudSize(setHudSize)
 if (window.watchpup.onHudAlignment) window.watchpup.onHudAlignment(setHudAlignment)
 if (window.watchpup.onHudVisibility) window.watchpup.onHudVisibility(setHudVisibility)
@@ -301,8 +321,8 @@ const HUD_SAFE_X = 28
 const PET_CHROME = 10 + 34 + 14
 function syncSize(verticalAnchor = 'bottom') {
   requestAnimationFrame(() => {
-    const visible = !bubble.classList.contains('hidden')
-    const bubbleH = visible ? bubble.getBoundingClientRect().height : 0
+    const visible = !bubbleStack.classList.contains('hidden')
+    const bubbleH = visible ? bubbleStack.getBoundingClientRect().height : 0
     const petArea = BASE_PET_AREA * petSizePercent / 100
     const hudVisible = !activityHud.classList.contains('hidden')
     const hudH = hudVisible ? activityHud.getBoundingClientRect().height : 0
@@ -350,33 +370,19 @@ function createActivityRow() {
   row.append(dot, icon, title, state, context)
   const elapsed = document.createElement('span')
   elapsed.className = 'activity-elapsed'
-  const open = document.createElement('button')
-  open.type = 'button'
-  open.className = 'activity-open'
-  const openIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-  openIcon.setAttribute('viewBox', '0 0 16 16')
-  openIcon.setAttribute('aria-hidden', 'true')
-  const openIconPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-  openIconPath.setAttribute('d', 'M6.5 3H4.25A1.25 1.25 0 0 0 3 4.25v7.5A1.25 1.25 0 0 0 4.25 13h7.5A1.25 1.25 0 0 0 13 11.75V9.5M8.5 3H13v4.5M13 3 7.5 8.5')
-  openIcon.append(openIconPath)
-  open.append(openIcon)
-  open.addEventListener('click', (event) => {
-    event.stopPropagation()
-    window.watchpup.openActivity(row.dataset.activityId)
-  })
-  row.append(elapsed, open)
+  row.append(elapsed)
   row.addEventListener('click', () => window.watchpup.openActivityDetail(row.dataset.activityId))
   row.addEventListener('keydown', (event) => {
     if (event.target !== row || (event.key !== 'Enter' && event.key !== ' ')) return
     event.preventDefault()
     window.watchpup.openActivityDetail(row.dataset.activityId)
   })
-  row.activityElements = { icon, title, state, context, elapsed, open }
+  row.activityElements = { icon, title, state, context, elapsed }
   return row
 }
 
 function updateActivityRow(row, activity) {
-  const { icon, title, state, context, elapsed, open } = row.activityElements
+  const { icon, title, state, context, elapsed } = row.activityElements
   row.dataset.activityId = activity.id
   row.className = `activity-row state-${activity.state || 'waiting'}`
   row.title = `Watchpup에서 보기 · ${activity.title || ''}`
@@ -387,11 +393,6 @@ function updateActivityRow(row, activity) {
   context.hidden = !Number.isFinite(activity.contextPercent)
   context.textContent = context.hidden ? '' : `${Math.round(activity.contextPercent)}%`
   elapsed.textContent = formatElapsed(activity.updatedAt)
-  open.hidden = false
-  open.disabled = activity.canOpen === false
-  const directTarget = activity.source === 'slack' ? 'Slack 스레드' : `${ACTIVITY_NAMES[activity.source]} 세션`
-  open.title = open.disabled ? '직접 열 수 없는 항목입니다' : `${directTarget}으로 이동`
-  open.setAttribute('aria-label', open.title)
 }
 
 function renderActivities(rows) {
@@ -419,72 +420,138 @@ window.watchpup.activityList().then(renderActivities).catch(() => {})
 window.watchpup.onActivitySessions(renderActivities)
 setInterval(() => renderActivities(activities), 30_000)
 
-let bubbleTimer = null
 let chatStreaming = false
 let chatBuf = ''
+let chatStartTimer = null
+let chatBubbleEntry = null
+let bubbleSequence = 0
+const CHAT_START_TIMEOUT_MS = 60_000
+
+function clearChatStartTimer() {
+  if (!chatStartTimer) return
+  clearTimeout(chatStartTimer)
+  chatStartTimer = null
+}
+
+function finishChatStreaming() {
+  clearChatStartTimer()
+  chatStreaming = false
+  chatBubbleEntry?.node.classList.remove('streaming')
+  hudMessage.classList.remove('streaming')
+}
 
 function renderBubbleSurface() {
+  bubbleActive = bubbleEntries.length > 0
   const state = bubbleSurfaceState({ active: bubbleActive, showActivityHud, activityCount: activityList.childElementCount })
-  bubble.classList.toggle('hidden', !state.bubbleVisible)
+  bubbleStack.classList.toggle('hidden', !state.bubbleVisible)
   hudMessage.classList.toggle('hidden', !state.hudMessageVisible)
   updateHudFoldControl()
   updateHudVisibility()
 }
 
-function hideBubbleSurface() {
-  bubbleActive = false
+function removeBubbleEntry(entry) {
+  const index = bubbleEntries.indexOf(entry)
+  if (index < 0) return
+  if (entry.timer) clearTimeout(entry.timer)
+  bubbleEntries.splice(index, 1)
+  entry.node.remove()
+  if (chatBubbleEntry === entry) chatBubbleEntry = null
   renderBubbleSurface()
 }
 
-function renderBubbleText(text) {
-  bubble.style.width = ''
-  bubble.textContent = text
-  if (bubble.scrollHeight <= bubble.clientHeight) return
+function pruneBubbleStack() {
+  for (const entry of bubbleEntriesToRemove(bubbleEntries, bubbleStackCount)) removeBubbleEntry(entry)
+}
+
+function renderBubbleText(entry, text) {
+  const node = entry.node
+  node.style.width = ''
+  node.textContent = text
+  if (node.scrollHeight <= node.clientHeight) return
 
   // 전체 문장으로 결정된 폭을 고정한 뒤, 가장 최근 4줄이 온전히 들어오는 접점을 찾는다.
-  bubble.style.width = `${bubble.getBoundingClientRect().width}px`
+  node.style.width = `${node.getBoundingClientRect().width}px`
   let low = 0
   let high = text.length
   while (low < high) {
     const middle = Math.floor((low + high) / 2)
-    bubble.textContent = `…${text.slice(middle).trimStart()}`
-    if (bubble.scrollHeight <= bubble.clientHeight) high = middle
+    node.textContent = `…${text.slice(middle).trimStart()}`
+    if (node.scrollHeight <= node.clientHeight) high = middle
     else low = middle + 1
   }
 
   const suffix = text.slice(low)
   const nextWord = suffix.search(/\s/)
   const start = nextWord >= 0 && nextWord < suffix.length - 1 ? low + nextWord + 1 : low
-  bubble.textContent = `…${text.slice(start).trimStart()}`
+  node.textContent = `…${text.slice(start).trimStart()}`
 }
 
-function showBubble(text, hideAfterMs) {
-  currentBubbleText = text
+function updateBubbleEntry(entry, text) {
+  entry.text = text
   hudMessageText.textContent = text
   hudMessage.title = text
-  bubble.setAttribute('aria-label', text)
-  bubbleActive = true
-  renderBubbleSurface()
-  renderBubbleText(text)
-  if (bubbleTimer) clearTimeout(bubbleTimer)
-  if (hideAfterMs) {
-    bubbleTimer = setTimeout(hideBubbleSurface, hideAfterMs)
-  }
+  entry.node.setAttribute('aria-label', text)
+  renderBubbleText(entry, text)
+  syncSize()
 }
 
-let bubbleMentionId = null
+function scheduleBubbleRemoval(entry, durationMs = bubbleDurationSeconds * 1000) {
+  if (entry.timer) clearTimeout(entry.timer)
+  entry.timer = durationMs > 0 ? setTimeout(() => removeBubbleEntry(entry), durationMs) : null
+}
+
+function openBubbleTarget(entry) {
+  const target = entry.target
+  if (target.kind === 'mention') window.watchpup.openMention(target.id)
+  else if (target.kind === 'work') window.watchpup.openWorkItem(target.id)
+  else if (target.kind === 'activity') window.watchpup.openActivityDetail(target.id)
+  else if (target.kind === 'calendar-privacy') window.watchpup.openCalendarPrivacy()
+  else if (target.kind === 'calendar') window.watchpup.openCalendar()
+  else if (target.kind === 'build-tool') window.watchpup.openBuildTool(target.tool)
+  else if (target.kind === 'external') window.watchpup.openExternal(target.url)
+  else window.watchpup.showPanel()
+  removeBubbleEntry(entry)
+}
+
+function createBubbleEntry(text, { target = { kind: 'panel' }, persistent = false } = {}) {
+  const node = document.createElement('button')
+  node.type = 'button'
+  node.className = 'bubble'
+  const entry = { id: ++bubbleSequence, node, text, target, persistent, timer: null }
+  if (target.kind !== 'panel') node.classList.add('clickable')
+  node.addEventListener('mouseenter', () => window.watchpup.setMouseIgnore(false))
+  node.addEventListener('mouseleave', () => window.watchpup.setMouseIgnore(true))
+  node.addEventListener('click', () => openBubbleTarget(entry))
+  bubbleEntries.push(entry)
+  bubbleStack.appendChild(node)
+  updateBubbleEntry(entry, text)
+  pruneBubbleStack()
+  renderBubbleSurface()
+  if (!persistent) scheduleBubbleRemoval(entry)
+  return entry
+}
+
 window.watchpup.onBubble((payload) => {
-  // payload: string(구버전/idle) 또는 { text, mentionId }
+  // payload: string(구버전/idle) 또는 연결 대상이 포함된 말풍선 객체.
   const text = typeof payload === 'string' ? payload : payload && payload.text
   const id = typeof payload === 'object' && payload ? payload.mentionId : null
+  const workItemId = typeof payload === 'object' && payload ? payload.workItemId : null
+  const activityId = typeof payload === 'object' && payload ? payload.activityId : null
+  const calendarEvent = typeof payload === 'object' && payload ? payload.calendarEvent === true : false
+  const calendarPrivacy = typeof payload === 'object' && payload ? payload.calendarPrivacy === true : false
+  const externalUrl = typeof payload === 'object' && payload ? (payload.externalUrl || payload.slackNewsUrl) : null
+  const buildTool = typeof payload === 'object' && payload ? payload.buildTool : null
   if (typeof text !== 'string' || !text) return
-  if (chatStreaming) return
-  bubbleMentionId = id || null
-  bubble.classList.remove('streaming')
-  hudMessage.classList.remove('streaming')
-  bubble.classList.toggle('clickable', !!bubbleMentionId)
-  hudMessage.classList.toggle('clickable', !!bubbleMentionId)
-  showBubble(text, 30000)
+  const target = bubbleOpenTarget(
+    id || null,
+    workItemId || null,
+    activityId || null,
+    calendarEvent,
+    calendarPrivacy,
+    typeof externalUrl === 'string' ? externalUrl : null,
+    buildTool === 'xcode' || buildTool === 'android' ? buildTool : null,
+  )
+  createBubbleEntry(text, { target })
 })
 
 // 채팅/액션 답변을 말풍선으로 스트리밍 (progress 누적, result 교체)
@@ -492,45 +559,48 @@ window.watchpup.onChatBubble((ev) => {
   if (!ev || typeof ev !== 'object') return
   const type = ev.type
   if (type === 'start') {
+    clearChatStartTimer()
+    if (chatBubbleEntry) removeBubbleEntry(chatBubbleEntry)
     chatStreaming = true
     chatBuf = ''
-    bubble.classList.add('streaming')
+    chatBubbleEntry = createBubbleEntry('답변을 준비하고 있어요…', { persistent: true })
+    chatBubbleEntry.node.classList.add('streaming')
     hudMessage.classList.add('streaming')
-    showBubble('…', null)
+    chatStartTimer = setTimeout(() => {
+      chatStartTimer = null
+      if (!chatStreaming || chatBuf) return
+      finishChatStreaming()
+      if (chatBubbleEntry) removeBubbleEntry(chatBubbleEntry)
+    }, CHAT_START_TIMEOUT_MS)
     return
   }
   if (type === 'progress' || type === 'assistant_text') {
+    clearChatStartTimer()
     chatStreaming = true
     chatBuf += ev.text || ''
-    showBubble(chatBuf || '…', null)
+    if (!chatBubbleEntry) chatBubbleEntry = createBubbleEntry('답변을 준비하고 있어요…', { persistent: true })
+    chatBubbleEntry.node.classList.add('streaming')
+    updateBubbleEntry(chatBubbleEntry, chatBuf || '답변을 준비하고 있어요…')
   } else if (type === 'result') {
-    chatStreaming = false
-    bubble.classList.remove('streaming')
-    hudMessage.classList.remove('streaming')
-    showBubble(ev.text || chatBuf || '(빈 응답)', 20000)
+    finishChatStreaming()
+    if (!chatBubbleEntry) chatBubbleEntry = createBubbleEntry('', { persistent: true })
+    chatBubbleEntry.persistent = false
+    updateBubbleEntry(chatBubbleEntry, ev.text || chatBuf || '(빈 응답)')
+    scheduleBubbleRemoval(chatBubbleEntry)
   } else if (type === 'error') {
-    chatStreaming = false
-    bubble.classList.remove('streaming')
-    hudMessage.classList.remove('streaming')
-    showBubble('오류: ' + (ev.message || '알 수 없음'), 9000)
+    finishChatStreaming()
+    if (!chatBubbleEntry) chatBubbleEntry = createBubbleEntry('', { persistent: true })
+    chatBubbleEntry.persistent = false
+    updateBubbleEntry(chatBubbleEntry, '오류: ' + (ev.message || '알 수 없음'))
+    scheduleBubbleRemoval(chatBubbleEntry)
   }
 })
 
-bubble.addEventListener('mouseenter', () => window.watchpup.setMouseIgnore(false))
-bubble.addEventListener('mouseleave', () => window.watchpup.setMouseIgnore(true))
 activityHud.addEventListener('mouseenter', () => window.watchpup.setMouseIgnore(false))
 activityHud.addEventListener('mouseleave', () => window.watchpup.setMouseIgnore(true))
 activityHud.addEventListener('click', (event) => {
   if (event.target === activityHud || event.target === activityList) window.watchpup.openActivityDetail()
 })
-// 말풍선 클릭 → 스레드가 연결돼 있으면 그 스레드를 열고, 아니면 패널을 연다.
-function openBubbleTarget() {
-  if (bubbleMentionId) window.watchpup.openMention(bubbleMentionId)
-  else window.watchpup.showPanel()
-  hideBubbleSurface()
-}
-bubble.addEventListener('click', openBubbleTarget)
-hudMessage.addEventListener('click', openBubbleTarget)
 hudFold.addEventListener('click', () => setHudFolded(!hudFolded))
 
 // ---- click-through 토글 (몸통 위에서만 상호작용) ----

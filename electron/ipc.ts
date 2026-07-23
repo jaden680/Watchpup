@@ -3,6 +3,9 @@ export const CMD = {
   mentionsList: 'mentions.list',
   mentionGet: 'mention.get',
   mentionRead: 'mention.read',
+  mentionReminderLink: 'mention.reminder.link',
+  mentionToWork: 'mention.toWork',
+  mentionToWorkAI: 'mention.toWorkAI',
   threadImport: 'thread.import',
   todoToggle: 'todo.toggle',
   replyApprove: 'reply.approve',
@@ -10,6 +13,11 @@ export const CMD = {
   chatSend: 'chat.send',
   settingsGet: 'settings.get',
   settingsSet: 'settings.set',
+  modelCatalogGet: 'model.catalog.get',
+  modelCatalogRefresh: 'model.catalog.refresh',
+  naggingLogList: 'nagging.log.list',
+  naggingLogClear: 'nagging.log.clear',
+  calendarAccessRequest: 'calendar.access.request',
   tokensGet: 'tokens.get',
   tokensSet: 'tokens.set',
   playbooksList: 'playbooks.list',
@@ -17,6 +25,31 @@ export const CMD = {
   playbookDelete: 'playbook.delete',
   actionRun: 'action.run',
   reactionSet: 'reaction.set',
+  workLists: 'work.lists',
+  workItems: 'work.items',
+  workListSelect: 'work.list.select',
+  workReminderCreate: 'work.reminder.create',
+  workReminderSubtaskAdd: 'work.reminder.subtask.add',
+  workReminderTitleUpdate: 'work.reminder.title.update',
+  workReminderNoteUpdate: 'work.reminder.note.update',
+  workReminderComplete: 'work.reminder.complete',
+  workReminderLinkAdd: 'work.reminder.link.add',
+  workReminderLinkRemove: 'work.reminder.link.remove',
+  workReminderLinkUpdate: 'work.reminder.link.update',
+  workItemTouch: 'work.item.touch',
+  workLinkStatus: 'work.link.status',
+  workLinkAction: 'work.link.action',
+  workRemindersOpen: 'work.reminders.open',
+  workAgentGet: 'workagent.get',
+  workAgentList: 'workagent.list',
+  workAgentPrefsSet: 'workagent.prefs.set',
+  workAgentRun: 'workagent.run',
+  workAgentCancel: 'workagent.cancel',
+  workAgentDismiss: 'workagent.dismiss',
+  workAgentOpen: 'workagent.open',
+  workAgentPlan: 'workagent.plan.read',
+  workAgentPlanOpen: 'workagent.plan.open',
+  workAgentChat: 'workagent.chat',
 } as const
 
 export const EVT = {
@@ -33,11 +66,16 @@ export const EVT = {
   petCodex: 'pet.codex',
   petSize: 'pet.size',
   bubbleSize: 'bubble.size',
+  bubbleStackCount: 'bubble.stackCount',
+  bubbleDuration: 'bubble.duration',
   hudSize: 'hud.size',
   hudAlignment: 'hud.alignment',
   hudVisibility: 'hud.visibility',
   actionStream: 'action.stream',
   actionDone: 'action.done',
+  naggingLogChanged: 'nagging.log.changed',
+  workAgentChanged: 'workagent.changed',
+  workAgentChatStream: 'workagent.chat.stream',
 } as const
 
 export interface ChatSendArgs {
@@ -48,6 +86,14 @@ export interface ChatSendArgs {
 export interface ThreadImportResult {
   id: string
   existing: boolean
+}
+
+/** mention.toWork 결과. 목록 미선택 시 ok:false + reason:'no-list', 성공 시 생성된 Reminder id / updated:true면 기존 미리알림을 갱신한 것 */
+export interface MentionToWorkResult {
+  ok: boolean
+  id?: string
+  reason?: 'no-list'
+  updated?: boolean
 }
 
 export interface TodoToggleArgs {
@@ -89,9 +135,21 @@ export interface SettingsPatch {
   petAlwaysOnTop?: boolean
   petSizePercent?: number
   bubbleSizePercent?: number
+  bubbleStackCount?: number
+  bubbleDurationSeconds?: number
   hudSizePercent?: number
   hudAlignment?: 'left' | 'right'
   showActivityHud?: boolean
+  naggingEnabled?: boolean
+  naggingMinMinutes?: number
+  naggingMaxMinutes?: number
+  githubPrNaggingEnabled?: boolean
+  slackNewsEnabled?: boolean
+  slackNewsChannels?: string[]
+  slackNewsKeywords?: string[]
+  buildAlertsEnabled?: boolean
+  xcodeBuildAlertsEnabled?: boolean
+  androidBuildAlertsEnabled?: boolean
   petImageDir?: string
   petCodexDir?: string
   persona?: string
@@ -102,6 +160,17 @@ export interface SettingsPatch {
     folder?: string
   }
   model?: string
+  workAgentEnabled?: boolean
+  workAgentUseOrca?: boolean
+  workAgentEnglishBranch?: boolean
+  workAgentProvider?: 'claude' | 'codex'
+  workAgentModel?: string
+  workAgentCodexModel?: string
+  workAgentIntervalMinutes?: number
+  reminderTaskSortOrder?: 'manual' | 'dueDateThenTitle' | 'createdNewest' | 'updatedNewest' | 'titleAscending'
+  reminderTaskManualOrder?: string[]
+  showCompletedReminders?: boolean
+  mentionSortOrder?: 'lastMessage' | 'fetched'
 }
 
 /** 저장할 토큰(빈 문자열/undefined는 무시 = 기존 유지). 값은 Keychain에만 저장. */

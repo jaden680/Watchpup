@@ -63,6 +63,7 @@ describe('LocalAgentPoller', () => {
     writeFileSync(join(registryDir, `${claudeId}.json`), JSON.stringify({ sessionId: claudeId, cwd: '/tmp/demo', name: 'Claude UI 구현' }))
     writeFileSync(join(claudeDir, `${claudeId}.jsonl`), jsonl([
       { timestamp: now, type: 'user', sessionId: claudeId, entrypoint: 'claude-desktop', cwd: '/tmp/demo', message: { content: '상태 UI 만들어줘' } },
+      { timestamp: now, type: 'custom-title', customTitle: '실제 Claude 세션 제목' },
     ]))
     writeFileSync(join(claudeDir, `${sdkId}.jsonl`), jsonl([
       { timestamp: now, type: 'user', sessionId: sdkId, entrypoint: 'sdk-cli', cwd: '/tmp/demo', message: { content: 'Watchpup 내부 호출' } },
@@ -75,7 +76,7 @@ describe('LocalAgentPoller', () => {
       `codex:${codexId}`,
     ])
     expect(first.find((row) => row.source === 'codex')).toMatchObject({ title: '통합 세션 HUD', state: 'running' })
-    expect(first.find((row) => row.source === 'claude')).toMatchObject({ title: 'Claude UI 구현', state: 'running' })
+    expect(first.find((row) => row.source === 'claude')).toMatchObject({ title: '실제 Claude 세션 제목', state: 'running' })
 
     appendFileSync(codexPath, jsonl([
       { timestamp: now + 1_000, type: 'event_msg', payload: { type: 'task_complete', last_agent_message: '완료' } },

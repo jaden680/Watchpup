@@ -3,6 +3,7 @@
 import { playbooks, playbookById } from './playbooks.js'
 import { lessonKeyLabel } from './format.js'
 import { copyToClipboard } from './richtext.js'
+import { modelOptionsWithCurrent } from './model-options.js'
 
 // Slack 봇 생성용 앱 매니페스트 (From an app manifest 에 붙여넣기).
 // scope는 코드가 실제 호출하는 API에 맞춤: conversations.replies/info, chat.postMessage,
@@ -109,6 +110,7 @@ function showSset(key) {
   settingsViewEl.classList.toggle('flow-active', isFlow)
   settingsFormEl.style.display = isFlow ? 'none' : ''
   playbooksPanelEl.style.display = isFlow ? '' : 'none'
+  if (key === 'nagging') void renderNaggingLog()
 }
 
 document.querySelectorAll('.sset-tab').forEach((tab) => {
@@ -124,12 +126,143 @@ const petSizeInput = settingsForm.elements['petSizePercent']
 const petSizeValue = document.getElementById('pet-size-value')
 const bubbleSizeInput = settingsForm.elements['bubbleSizePercent']
 const bubbleSizeValue = document.getElementById('bubble-size-value')
+const bubbleStackCountInput = settingsForm.elements['bubbleStackCount']
+const bubbleDurationInput = settingsForm.elements['bubbleDurationSeconds']
 const hudSizeInput = settingsForm.elements['hudSizePercent']
 const hudSizeValue = document.getElementById('hud-size-value')
 const showActivityHudInput = settingsForm.elements['showActivityHud']
 const hudSizeField = document.getElementById('hud-size-field')
 const hudAlignmentInput = settingsForm.elements['hudAlignment']
 const hudAlignmentField = document.getElementById('hud-alignment-field')
+const modelSelect = settingsForm.elements['model']
+const modelRefreshButton = document.getElementById('model-refresh')
+const modelHint = document.getElementById('model-hint')
+const naggingEnabledInput = settingsForm.elements['naggingEnabled']
+const naggingMinInput = settingsForm.elements['naggingMinMinutes']
+const naggingMaxInput = settingsForm.elements['naggingMaxMinutes']
+const githubPrNaggingEnabledInput = settingsForm.elements['githubPrNaggingEnabled']
+const slackNewsEnabledInput = settingsForm.elements['slackNewsEnabled']
+const slackNewsChannelsInput = settingsForm.elements['slackNewsChannels']
+const slackNewsKeywordsInput = settingsForm.elements['slackNewsKeywords']
+const buildAlertsEnabledInput = settingsForm.elements['buildAlertsEnabled']
+const xcodeBuildAlertsEnabledInput = settingsForm.elements['xcodeBuildAlertsEnabled']
+const androidBuildAlertsEnabledInput = settingsForm.elements['androidBuildAlertsEnabled']
+const buildAlertCard = document.querySelector('.build-alert-card')
+const buildAlertHint = document.getElementById('build-alert-hint')
+const naggingCard = document.querySelector('.nagging-card')
+const naggingHint = document.getElementById('nagging-hint')
+const naggingCalendarSettings = document.getElementById('nagging-calendar-settings')
+const naggingLogList = document.getElementById('nagging-log-list')
+const naggingLogCount = document.getElementById('nagging-log-count')
+const naggingLogRefresh = document.getElementById('nagging-log-refresh')
+const naggingLogClear = document.getElementById('nagging-log-clear')
+
+const NAGGING_KIND_LABELS = {
+  calendar: '캘린더',
+  agent: 'Agent',
+  github: 'GitHub',
+  slack: 'Slack',
+  work: 'Work',
+  general: '일반',
+}
+
+function naggingLogRow(entry) {
+  const row = document.createElement('li')
+  const meta = document.createElement('div')
+  meta.className = 'nagging-log-meta'
+  const kind = document.createElement('span')
+  kind.className = `nagging-log-kind kind-${entry.kind || 'general'}`
+  kind.textContent = NAGGING_KIND_LABELS[entry.kind] || entry.kind || '일반'
+  const time = document.createElement('time')
+  time.dateTime = new Date(entry.at).toISOString()
+  time.textContent = new Date(entry.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  meta.append(kind, time)
+  if (entry.context) {
+    const context = document.createElement('span')
+    context.className = 'nagging-log-context'
+    context.textContent = entry.context
+    meta.append(context)
+  }
+  const text = document.createElement('p')
+  text.textContent = entry.text || '(빈 문구)'
+  row.append(meta, text)
+  return row
+}
+
+async function renderNaggingLog() {
+  if (!naggingLogList) return
+  try {
+    const entries = await window.watchpup.naggingLogList()
+    naggingLogCount.textContent = `최근 잔소리 ${entries.length}개`
+    naggingLogList.replaceChildren(...entries.map(naggingLogRow))
+    if (!entries.length) {
+      const empty = document.createElement('li')
+      empty.className = 'nagging-log-empty'
+      empty.textContent = '아직 표시된 잔소리가 없어요.'
+      naggingLogList.append(empty)
+    }
+  } catch (error) {
+    naggingLogList.replaceChildren()
+    const failed = document.createElement('li')
+    failed.className = 'nagging-log-empty'
+    failed.textContent = `로그를 불러오지 못했습니다: ${error?.message || error}`
+    naggingLogList.append(failed)
+  }
+}
+
+function renderModelOptions(current, available) {
+  const modelState = modelOptionsWithCurrent(current, available)
+  modelSelect.replaceChildren(...modelState.options.map(({ value, label, custom }) => {
+    const option = document.createElement('option')
+    option.value = value
+    option.textContent = label
+    if (custom) option.dataset.custom = 'true'
+    return option
+  }))
+  modelSelect.value = modelState.selected
+}
+
+function modelCatalogHint(catalog) {
+  if (catalog.source === 'fallback') return `CLI 조회 실패 · 기본 목록 사용${catalog.error ? ` (${catalog.error})` : ''}`
+  const fetched = catalog.fetchedAt ? new Date(catalog.fetchedAt).toLocaleString('ko-KR') : ''
+  const cached = catalog.cached ? '마지막 조회' : '방금 조회'
+  return `${catalog.options.length}개 모델 · Claude CLI ${catalog.cliVersion} · ${cached}${fetched ? ` ${fetched}` : ''}`
+}
+
+// Work 에이전트용 Claude 모델 선택: '' = 전역 모델 따름 옵션을 앞에 붙인다
+function renderWorkAgentModelOptions(current, available) {
+  const select = settingsForm.elements['workAgentModel']
+  if (!select) return
+  const modelState = modelOptionsWithCurrent(current || 'default', available)
+  const options = [{ value: '', label: '전역 모델 따름' }, ...modelState.options]
+  select.replaceChildren(...options.map(({ value, label }) => {
+    const option = document.createElement('option')
+    option.value = value
+    option.textContent = label
+    return option
+  }))
+  select.value = current || ''
+  if (select.value !== (current || '')) select.value = ''
+}
+
+async function loadModelCatalog(current, force = false) {
+  if (!modelSelect) return
+  modelRefreshButton.disabled = true
+  modelHint.textContent = force ? 'Claude CLI에서 모델 목록 새로고침 중…' : '모델 목록 확인 중…'
+  try {
+    const catalog = force ? await window.watchpup.modelCatalogRefresh() : await window.watchpup.modelCatalogGet()
+    renderModelOptions(modelSelect.value || current, catalog.options)
+    const workAgentSelect = settingsForm.elements['workAgentModel']
+    if (workAgentSelect) renderWorkAgentModelOptions(workAgentSelect.value, catalog.options)
+    modelHint.textContent = modelCatalogHint(catalog)
+  } catch (error) {
+    modelHint.textContent = error?.message || 'Claude CLI 모델 목록을 읽지 못했습니다.'
+  } finally {
+    modelRefreshButton.disabled = false
+  }
+}
+
+modelRefreshButton?.addEventListener('click', () => loadModelCatalog(modelSelect.value, true))
 
 function updatePetSizeLabel() {
   if (petSizeInput && petSizeValue) petSizeValue.textContent = `${petSizeInput.value}%`
@@ -137,6 +270,11 @@ function updatePetSizeLabel() {
 
 function updateBubbleSizeLabel() {
   if (bubbleSizeInput && bubbleSizeValue) bubbleSizeValue.textContent = `${bubbleSizeInput.value}%`
+}
+
+function boundedInteger(input, fallback, minimum, maximum) {
+  const value = parseInt(input?.value || '', 10)
+  return Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback
 }
 
 function updateHudSizeLabel() {
@@ -151,10 +289,89 @@ function updateHudControls() {
   if (hudAlignmentField) hudAlignmentField.classList.toggle('is-disabled', !enabled)
 }
 
+function naggingMinutes(input, fallback) {
+  const value = parseInt(input?.value || '', 10)
+  return Number.isFinite(value) ? Math.max(1, Math.min(120, value)) : fallback
+}
+
+function subscriptionList(value) {
+  return [...new Set(String(value || '').split(/[,\n]/).map((item) => item.trim()).filter(Boolean))]
+}
+
+function updateNaggingControls() {
+  const enabled = !!naggingEnabledInput?.checked
+  if (naggingMinInput) naggingMinInput.disabled = !enabled
+  if (naggingMaxInput) naggingMaxInput.disabled = !enabled
+  if (githubPrNaggingEnabledInput) githubPrNaggingEnabledInput.disabled = !enabled
+  if (slackNewsEnabledInput) slackNewsEnabledInput.disabled = !enabled
+  const slackNewsEnabled = enabled && !!slackNewsEnabledInput?.checked
+  const githubPrEnabled = enabled && !!githubPrNaggingEnabledInput?.checked
+  if (slackNewsChannelsInput) slackNewsChannelsInput.disabled = !slackNewsEnabled
+  if (slackNewsKeywordsInput) slackNewsKeywordsInput.disabled = !slackNewsEnabled
+  naggingCard?.classList.toggle('is-disabled', !enabled)
+  const min = naggingMinutes(naggingMinInput, 5)
+  const max = Math.max(min, naggingMinutes(naggingMaxInput, 12))
+  if (naggingHint) {
+    naggingHint.textContent = enabled
+      ? `캘린더·Agent 타이밍을 먼저 알리고, 그 외에는 ${min}~${max}분 사이에 Work${githubPrEnabled ? '·GitHub PR' : ''}${slackNewsEnabled ? '·Slack 새 소식' : ''}을 다시 꺼냅니다.`
+      : '현재 꺼져 있어요. 활성화해야 잔소리가 시작됩니다.'
+  }
+}
+
+function updateBuildAlertControls() {
+  const enabled = !!buildAlertsEnabledInput?.checked
+  if (xcodeBuildAlertsEnabledInput) xcodeBuildAlertsEnabledInput.disabled = !enabled
+  if (androidBuildAlertsEnabledInput) androidBuildAlertsEnabledInput.disabled = !enabled
+  buildAlertCard?.classList.toggle('is-disabled', !enabled)
+  const tools = [
+    xcodeBuildAlertsEnabledInput?.checked ? 'Xcode' : '',
+    androidBuildAlertsEnabledInput?.checked ? 'Android Studio' : '',
+  ].filter(Boolean)
+  if (buildAlertHint) {
+    buildAlertHint.textContent = enabled
+      ? `${tools.join('·') || '선택한 IDE 없음'}의 새 빌드 완료를 약 3초 안에 알려줍니다.`
+      : '현재 꺼져 있어요. 활성화 이후 완료되는 새 빌드부터 알려줍니다.'
+  }
+}
+
 if (petSizeInput) petSizeInput.addEventListener('input', updatePetSizeLabel)
 if (bubbleSizeInput) bubbleSizeInput.addEventListener('input', updateBubbleSizeLabel)
 if (hudSizeInput) hudSizeInput.addEventListener('input', updateHudSizeLabel)
 if (showActivityHudInput) showActivityHudInput.addEventListener('change', updateHudControls)
+if (naggingEnabledInput) naggingEnabledInput.addEventListener('change', updateNaggingControls)
+if (naggingMinInput) naggingMinInput.addEventListener('input', updateNaggingControls)
+if (naggingMaxInput) naggingMaxInput.addEventListener('input', updateNaggingControls)
+if (githubPrNaggingEnabledInput) githubPrNaggingEnabledInput.addEventListener('change', updateNaggingControls)
+if (slackNewsEnabledInput) slackNewsEnabledInput.addEventListener('change', updateNaggingControls)
+if (buildAlertsEnabledInput) buildAlertsEnabledInput.addEventListener('change', updateBuildAlertControls)
+if (xcodeBuildAlertsEnabledInput) xcodeBuildAlertsEnabledInput.addEventListener('change', updateBuildAlertControls)
+if (androidBuildAlertsEnabledInput) androidBuildAlertsEnabledInput.addEventListener('change', updateBuildAlertControls)
+if (naggingCalendarSettings) naggingCalendarSettings.addEventListener('click', async () => {
+  if (naggingCalendarSettings.dataset.openSettings === 'true') {
+    window.watchpup.openCalendarPrivacy()
+    return
+  }
+  naggingCalendarSettings.disabled = true
+  naggingCalendarSettings.textContent = '연결 중…'
+  try {
+    const status = await window.watchpup.requestCalendarAccess()
+    naggingCalendarSettings.textContent = status === 'authorized' ? '캘린더 연결됨' : '캘린더 연결'
+    if (status !== 'authorized' && naggingHint) naggingHint.textContent = '캘린더 권한이 허용되지 않았어요. 시스템 설정에서 Watchpup을 허용해주세요.'
+  } catch (error) {
+    naggingCalendarSettings.textContent = '시스템 설정 열기'
+    if (naggingHint) naggingHint.textContent = error?.message || '캘린더 권한을 확인하지 못했습니다.'
+    naggingCalendarSettings.dataset.openSettings = 'true'
+  } finally {
+    naggingCalendarSettings.disabled = false
+  }
+})
+if (naggingLogRefresh) naggingLogRefresh.addEventListener('click', () => renderNaggingLog())
+if (naggingLogClear) naggingLogClear.addEventListener('click', async () => {
+  if (!confirm('잔소리 디버그 로그를 모두 비울까요?')) return
+  await window.watchpup.naggingLogClear()
+  await renderNaggingLog()
+})
+window.watchpup.onNaggingLogChanged?.(() => renderNaggingLog())
 
 async function loadSettings() {
   const cfg = await window.watchpup.settingsGet()
@@ -164,13 +381,28 @@ async function loadSettings() {
   if (settingsForm.elements['petAlwaysOnTop']) settingsForm.elements['petAlwaysOnTop'].checked = cfg.petAlwaysOnTop !== false
   if (petSizeInput) petSizeInput.value = String(cfg.petSizePercent ?? 100)
   if (bubbleSizeInput) bubbleSizeInput.value = String(cfg.bubbleSizePercent ?? 100)
+  if (bubbleStackCountInput) bubbleStackCountInput.value = String(cfg.bubbleStackCount ?? 3)
+  if (bubbleDurationInput) bubbleDurationInput.value = String(cfg.bubbleDurationSeconds ?? 10)
   if (hudSizeInput) hudSizeInput.value = String(cfg.hudSizePercent ?? 100)
   if (hudAlignmentInput) hudAlignmentInput.value = cfg.hudAlignment === 'left' ? 'left' : 'right'
   if (showActivityHudInput) showActivityHudInput.checked = cfg.showActivityHud !== false
+  if (naggingEnabledInput) naggingEnabledInput.checked = cfg.naggingEnabled === true
+  if (naggingMinInput) naggingMinInput.value = String(cfg.naggingMinMinutes ?? 5)
+  if (naggingMaxInput) naggingMaxInput.value = String(cfg.naggingMaxMinutes ?? 12)
+  if (githubPrNaggingEnabledInput) githubPrNaggingEnabledInput.checked = cfg.githubPrNaggingEnabled !== false
+  if (slackNewsEnabledInput) slackNewsEnabledInput.checked = cfg.slackNewsEnabled === true
+  if (slackNewsChannelsInput) slackNewsChannelsInput.value = (cfg.slackNewsChannels || ['all_전사공유', 'all_전사공지', 'all_random']).join(', ')
+  if (slackNewsKeywordsInput) slackNewsKeywordsInput.value = (cfg.slackNewsKeywords || []).join(', ')
+  if (buildAlertsEnabledInput) buildAlertsEnabledInput.checked = cfg.buildAlertsEnabled === true
+  if (xcodeBuildAlertsEnabledInput) xcodeBuildAlertsEnabledInput.checked = cfg.xcodeBuildAlertsEnabled !== false
+  if (androidBuildAlertsEnabledInput) androidBuildAlertsEnabledInput.checked = cfg.androidBuildAlertsEnabled !== false
   updatePetSizeLabel()
   updateBubbleSizeLabel()
   updateHudSizeLabel()
   updateHudControls()
+  updateNaggingControls()
+  updateBuildAlertControls()
+  await renderNaggingLog()
   if (settingsForm.elements['persona']) settingsForm.elements['persona'].value = cfg.persona || ''
   if (settingsForm.elements['bubbleStyle']) settingsForm.elements['bubbleStyle'].value = cfg.bubbleStyle || 'status'
   const petimgPathEl = document.getElementById('petimg-path')
@@ -184,7 +416,17 @@ async function loadSettings() {
   settingsForm.elements['obsidian.vaultPath'].value = cfg.obsidian?.vaultPath || ''
   settingsForm.elements['obsidian.folder'].value = cfg.obsidian?.folder || ''
   updateObsidianHint()
-  settingsForm.elements['model'].value = cfg.model || ''
+  renderModelOptions(cfg.model)
+  void loadModelCatalog(cfg.model)
+  if (settingsForm.elements['workAgentEnabled']) {
+    settingsForm.elements['workAgentEnabled'].checked = !!cfg.workAgentEnabled
+    settingsForm.elements['workAgentUseOrca'].checked = cfg.workAgentUseOrca !== false
+    settingsForm.elements['workAgentEnglishBranch'].checked = !!cfg.workAgentEnglishBranch
+    settingsForm.elements['workAgentProvider'].value = cfg.workAgentProvider === 'codex' ? 'codex' : 'claude'
+    settingsForm.elements['workAgentCodexModel'].value = cfg.workAgentCodexModel || ''
+    settingsForm.elements['workAgentIntervalMinutes'].value = cfg.workAgentIntervalMinutes || 30
+    renderWorkAgentModelOptions(cfg.workAgentModel || '')
+  }
   await refreshTokenStatus()
   await renderGroups()
   await renderRepos()
@@ -202,7 +444,12 @@ async function renderIntegrations() {
   const nD = document.getElementById('notion-disconnect')
   if (nD) nD.classList.toggle('hidden', !st.notion.connected)
   const jS = document.getElementById('integ-jira-status')
-  if (jS) { jS.textContent = st.jira.connected ? '● 연결됨' : '○ 미연결'; jS.className = 'integ-status ' + (st.jira.connected ? 'on' : '') }
+  if (jS) {
+    const needsReconnect = st.jira.connected && st.jira.authenticated === false
+    jS.textContent = needsReconnect ? '● 재연결 필요' : st.jira.connected ? '● 연결됨' : '○ 미연결'
+    jS.className = 'integ-status ' + (needsReconnect ? 'warn' : st.jira.connected ? 'on' : '')
+    jS.title = needsReconnect ? (st.jira.error || 'Jira API Token을 다시 입력해주세요.') : ''
+  }
   const jD = document.getElementById('jira-disconnect')
   if (jD) jD.classList.toggle('hidden', !st.jira.connected)
   if (st.jira.site) document.getElementById('jira-site').value = st.jira.site
@@ -234,14 +481,18 @@ document.getElementById('jira-connect')?.addEventListener('click', async () => {
   const token = document.getElementById('jira-token').value.trim()
   const status = await window.watchpup.integrationStatus()
   if (!site || !email) { msg.textContent = '사이트·이메일 필수'; return }
-  if (!token && !status.jira.connected) { msg.textContent = 'API 토큰을 입력하세요'; return }
+  if (!token && (!status.jira.connected || status.jira.authenticated === false)) { msg.textContent = '새 API 토큰을 입력하세요'; return }
   msg.textContent = '연결 중…'
   try {
     await window.watchpup.connectJira({ site, email, token })
     document.getElementById('jira-token').value = ''
-    msg.textContent = '연결됨 (다음 분석부터 적용)'
     await renderIntegrations(); await renderMcpList()
+    const verified = await window.watchpup.integrationStatus(true)
+    msg.textContent = verified.jira.authenticated ? '연결됨' : (verified.jira.error || '인증 확인 실패')
   } catch (e) { msg.textContent = '실패: ' + (e?.message || e) }
+})
+document.getElementById('jira-token-page')?.addEventListener('click', () => {
+  window.watchpup.openExternal('https://id.atlassian.com/manage-profile/security/api-tokens')
 })
 document.getElementById('jira-disconnect')?.addEventListener('click', async () => {
   if (!confirm('Jira 연동을 해제할까요?')) return
@@ -411,10 +662,71 @@ async function renderRepos() {
     listEl.appendChild(row)
   }
 }
+// 폴더 추가: git 레포면 바로 등록, 상위 폴더면 하위 git 레포 후보를 체크박스로 선택 등록
+function hideRepoScanPanel() {
+  document.getElementById('repos-scan-panel')?.classList.add('hidden')
+  const listEl = document.getElementById('repos-scan-list')
+  if (listEl) listEl.innerHTML = ''
+}
+
+function showRepoScanPanel(dir, candidates) {
+  const panel = document.getElementById('repos-scan-panel')
+  const title = document.getElementById('repos-scan-title')
+  const listEl = document.getElementById('repos-scan-list')
+  if (!panel || !title || !listEl) return
+  listEl.innerHTML = ''
+  title.textContent = `${dir} 하위에서 찾은 git 레포 ${candidates.length}개 — 추가할 레포를 선택하세요.`
+  for (const candidate of candidates) {
+    const row = document.createElement('label')
+    row.className = 'repos-scan-row'
+    const check = document.createElement('input')
+    check.type = 'checkbox'
+    check.value = candidate.path
+    check.checked = !candidate.already
+    check.disabled = candidate.already
+    const name = document.createElement('span')
+    name.className = 'repo-name'
+    name.textContent = candidate.name + (candidate.already ? ' (등록됨)' : '')
+    name.title = candidate.path
+    row.append(check, name)
+    listEl.appendChild(row)
+  }
+  panel.classList.remove('hidden')
+}
+
 document.getElementById('repos-add')?.addEventListener('click', async () => {
-  await window.watchpup.reposAdd()
-  await renderRepos()
+  const status = document.getElementById('repos-add-status')
+  hideRepoScanPanel()
+  if (status) status.textContent = ''
+  const result = await window.watchpup.reposAdd()
+  if (!result) return
+  if (result.repos) {
+    await renderRepos()
+    if (status) status.textContent = '레포 추가됨'
+    return
+  }
+  if (!result.candidates?.length) {
+    if (status) status.textContent = '선택한 폴더와 하위에서 git 레포를 찾지 못했어요.'
+    return
+  }
+  showRepoScanPanel(result.dir, result.candidates)
 })
+
+document.getElementById('repos-scan-add')?.addEventListener('click', async () => {
+  const status = document.getElementById('repos-add-status')
+  const checked = [...document.querySelectorAll('#repos-scan-list input[type="checkbox"]:checked:not(:disabled)')]
+    .map((check) => check.value)
+  if (!checked.length) {
+    if (status) status.textContent = '선택된 레포가 없어요.'
+    return
+  }
+  await window.watchpup.reposAddMany(checked)
+  hideRepoScanPanel()
+  await renderRepos()
+  if (status) status.textContent = `${checked.length}개 레포 추가됨`
+})
+
+document.getElementById('repos-scan-cancel')?.addEventListener('click', () => hideRepoScanPanel())
 document.getElementById('repos-gh-add')?.addEventListener('click', async () => {
   const input = document.getElementById('repos-gh-input')
   const status = document.getElementById('repos-gh-status')
@@ -541,9 +853,21 @@ settingsForm.addEventListener('submit', async (e) => {
     petAlwaysOnTop: settingsForm.elements['petAlwaysOnTop'] ? settingsForm.elements['petAlwaysOnTop'].checked : true,
     petSizePercent: petSizeInput ? parseInt(petSizeInput.value, 10) : 100,
     bubbleSizePercent: bubbleSizeInput ? parseInt(bubbleSizeInput.value, 10) : 100,
+    bubbleStackCount: boundedInteger(bubbleStackCountInput, 3, 1, 5),
+    bubbleDurationSeconds: boundedInteger(bubbleDurationInput, 10, 3, 60),
     hudSizePercent: hudSizeInput ? parseInt(hudSizeInput.value, 10) : 100,
     hudAlignment: hudAlignmentInput?.value === 'left' ? 'left' : 'right',
     showActivityHud: showActivityHudInput ? showActivityHudInput.checked : true,
+    naggingEnabled: naggingEnabledInput ? naggingEnabledInput.checked : false,
+    naggingMinMinutes: naggingMinutes(naggingMinInput, 5),
+    naggingMaxMinutes: Math.max(naggingMinutes(naggingMinInput, 5), naggingMinutes(naggingMaxInput, 12)),
+    githubPrNaggingEnabled: githubPrNaggingEnabledInput ? githubPrNaggingEnabledInput.checked : true,
+    slackNewsEnabled: slackNewsEnabledInput ? slackNewsEnabledInput.checked : false,
+    slackNewsChannels: subscriptionList(slackNewsChannelsInput?.value),
+    slackNewsKeywords: subscriptionList(slackNewsKeywordsInput?.value),
+    buildAlertsEnabled: buildAlertsEnabledInput ? buildAlertsEnabledInput.checked : false,
+    xcodeBuildAlertsEnabled: xcodeBuildAlertsEnabledInput ? xcodeBuildAlertsEnabledInput.checked : true,
+    androidBuildAlertsEnabled: androidBuildAlertsEnabledInput ? androidBuildAlertsEnabledInput.checked : true,
     persona: settingsForm.elements['persona'] ? settingsForm.elements['persona'].value.trim() : '',
     bubbleStyle: settingsForm.elements['bubbleStyle'] ? settingsForm.elements['bubbleStyle'].value : 'status',
     enableBot: settingsForm.elements['enableBot'].checked,
@@ -560,6 +884,17 @@ settingsForm.addEventListener('submit', async (e) => {
   // 빈 값은 patch에서 제외 — 그대로 넣으면 config 기본값을 ''로 덮어써버린다.
   const model = settingsForm.elements['model'].value.trim()
   if (model) patch.model = model
+  // Work 에이전트: 모델·레포는 '' 자체가 의미(전역/자동 따름)라 항상 포함한다.
+  if (settingsForm.elements['workAgentEnabled']) {
+    patch.workAgentEnabled = settingsForm.elements['workAgentEnabled'].checked
+    patch.workAgentUseOrca = settingsForm.elements['workAgentUseOrca']?.checked !== false
+    patch.workAgentEnglishBranch = !!settingsForm.elements['workAgentEnglishBranch']?.checked
+    patch.workAgentProvider = settingsForm.elements['workAgentProvider'].value === 'codex' ? 'codex' : 'claude'
+    patch.workAgentModel = settingsForm.elements['workAgentModel']?.value ?? ''
+    patch.workAgentCodexModel = settingsForm.elements['workAgentCodexModel']?.value.trim() ?? ''
+    const workAgentInterval = parseInt(settingsForm.elements['workAgentIntervalMinutes']?.value ?? '', 10)
+    if (Number.isFinite(workAgentInterval)) patch.workAgentIntervalMinutes = Math.min(240, Math.max(5, workAgentInterval))
+  }
   // 토큰: 입력된 것만 Keychain에 저장(비우면 기존 유지)
   const tokens = {}
   const bt = settingsForm.elements['botToken'].value.trim()

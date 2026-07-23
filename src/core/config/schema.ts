@@ -77,12 +77,49 @@ export const watchpupConfigSchema = z.object({
   petSizePercent: z.number().int().min(50).max(200).default(100),
   // 펫 위에 잠깐 표시되는 상태/분석 말풍선 크기(%).
   bubbleSizePercent: z.number().int().min(60).max(140).default(100),
+  // 동시에 보이는 말풍선 최대 개수와 일반 말풍선 노출 시간.
+  bubbleStackCount: z.number().int().min(1).max(5).default(3),
+  bubbleDurationSeconds: z.number().int().min(3).max(60).default(10),
   // 펫 아래에 표시되는 Claude/Codex/Slack 세션 HUD 크기(%).
   hudSizePercent: z.number().int().min(60).max(140).default(100),
   // 펫·말풍선·HUD가 공유하는 가로 기준선. 화면 오른쪽 배치를 고려해 오른쪽이 기본.
   hudAlignment: z.enum(['left', 'right']).default('right'),
   // 세션 HUD를 화면에 표시할지. 수집은 이 값과 무관하게 계속된다.
-  showActivityHud: z.boolean().default(true),
+  showActivityHud: z.boolean().default(false),
+  // 베타: 선택한 Work 목록의 미완료 작업을 무작위 간격으로 말풍선에서 상기한다.
+  naggingEnabled: z.boolean().default(false),
+  naggingMinMinutes: z.number().int().min(1).max(120).default(5),
+  naggingMaxMinutes: z.number().int().min(1).max(120).default(12),
+  // 로컬 GitHub CLI의 읽지 않은 최근 PR 알림을 잔소리 후보에 섞는다.
+  githubPrNaggingEnabled: z.boolean().default(true),
+  // 구독한 Slack 채널·키워드의 새 루트 메시지를 무작위 잔소리에 섞는다.
+  slackNewsEnabled: z.boolean().default(false),
+  slackNewsChannels: z.array(z.string()).default(['all_전사공유', 'all_전사공지', 'all_random']),
+  slackNewsKeywords: z.array(z.string()).default([]),
+  // Xcode·Android Studio의 로컬 빌드 로그 변경을 감지해 완료 즉시 말풍선으로 알린다.
+  buildAlertsEnabled: z.boolean().default(false),
+  xcodeBuildAlertsEnabled: z.boolean().default(true),
+  androidBuildAlertsEnabled: z.boolean().default(true),
+  // Work 자동 제안(에이전트): 시간 날 때 Work 상위 작업의 실행 계획을 격리 worktree에서 미리 세워 제안.
+  workAgentEnabled: z.boolean().default(false),
+  workAgentProvider: z.enum(['claude', 'codex']).default('claude'),
+  // 빈 값 = 전역 Claude 모델(model)을 따름
+  workAgentModel: z.string().default(''),
+  // 빈 값 = Codex CLI 기본 모델
+  workAgentCodexModel: z.string().default(''),
+  workAgentIntervalMinutes: z.number().int().min(5).max(240).default(30),
+  // Orca가 설치·실행 중이면 제안 작업을 Orca 터미널에서 눈에 보이게 실행 (claude 전용, 없으면 헤드리스 폴백)
+  workAgentUseOrca: z.boolean().default(true),
+  // 브랜치명을 haiku로 영어 슬러그화 (호출 비용 소액 발생). 꺼져 있으면 work-<id축약> 형태
+  workAgentEnglishBranch: z.boolean().default(false),
+  // Work 탭에서 사용할 Apple Reminders 목록. Watchpup이 자체적으로 선택을 저장한다.
+  reminderListId: z.string().default(''),
+  reminderListName: z.string().default(''),
+  reminderAccountName: z.string().default(''),
+  reminderListSelectionExplicit: z.boolean().default(false),
+  showCompletedReminders: z.boolean().default(false),
+  reminderTaskSortOrder: z.enum(['manual', 'dueDateThenTitle', 'createdNewest', 'updatedNewest', 'titleAscending']).default('dueDateThenTitle'),
+  reminderTaskManualOrder: z.array(z.string()).default([]),
   // 커스텀 펫 이미지 폴더(설정 시 이모지 대신 이미지 사용, 공모양 배경 제거).
   // 폴더에 idle/thinking/ready/chatting.(gif|png|apng|webp|jpg) 파일을 두면 상태별로 사용.
   petImageDir: z.string().default(''),

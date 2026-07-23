@@ -21,13 +21,13 @@
     "build:app": "node esbuild.electron.mjs",
     "prepare": "npm run build:app",
     "app": "npm run build:app && electron dist/electron/main.js",
-    "dist": "npm run build:app && electron-builder"
+    "dist": "npm run build:app && electron-builder",
+    "deploy": "npm run build:app && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir && node scripts/deploy-app.mjs"
   },
   "dependencies": {
     "@napi-rs/keyring": "^1.1.6",
     "@slack/bolt": "^4.2.0",
     "@slack/web-api": "^7.8.0",
-    "electron": "^33.2.0",
     "electron-updater": "^6.3.9",
     "js-yaml": "^4.1.0",
     "lru-cache": "^11.0.2",
@@ -36,6 +36,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.0",
+    "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "esbuild": "^0.24.0",
     "jsdom": "^29.1.1",

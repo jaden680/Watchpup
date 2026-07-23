@@ -6,8 +6,9 @@ import { Keychain } from '../secrets/keychain.js'
 import { computeToolScope } from '../safety/gating.js'
 import { writeMcpConfigFile, resolveMcpSecretEnv } from '../mcp/registry.js'
 import { runClaude } from '../agent/executor.js'
-import { watchpupSystemPrompt, analysisUserPrompt, playbookActionPrompt } from '../agent/prompts.js'
-import { parseAnalysis } from '../agent/analysis.js'
+import { watchpupSystemPrompt, analysisUserPrompt, playbookActionPrompt, reminderPrompt } from '../agent/prompts.js'
+import { parseAnalysis, parseReminderDraft, type ReminderDraftText } from '../agent/analysis.js'
+import { threadText } from './mention-context.js'
 
 export interface PipelineDeps {
   config: WatchpupConfig
@@ -99,6 +100,51 @@ export async function analyzeMention(
     analysis,
     todos: analysis.todos.map((t) => ({ text: t.text, done: false, playbookId: t.playbookId })),
   }
+}
+
+const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토']
+
+/** 오늘 날짜를 "YYYY-MM-DD (요일)" 형태로 — reminderPrompt에 now로 전달해 LLM이 연도/상대 날짜를 정확히 환산하게 함. */
+function todayKoreanString(d: Date = new Date()): string {
+  const y = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const da = String(d.getDate()).padStart(2, '0')
+  return `${y}-${mo}-${da} (${WEEKDAY_KO[d.getDay()]})`
+}
+
+/**
+ * 스레드 내용 기반 미리알림(Reminder) 초안 생성. 저장된 스레드(threadText)만 사용(재조회 없음).
+ * 세션 재사용 없이 단발 호출 — 스레드 텍스트를 프롬프트에 직접 담아 보내므로 resume이 불필요.
+ */
+export async function generateReminderDraft(
+  deps: PipelineDeps,
+  input: { mention: Mention; extra?: string },
+): Promise<ReminderDraftText> {
+  const { config } = deps
+  const run = deps.runClaudeFn ?? runClaude
+  const { mention, extra } = input
+  const { scope, mcpConfigPath, secretEnv, addDirs } = await prepare(deps)
+
+  const result: AgentResult = await run({
+    prompt: reminderPrompt({
+      threadText: threadText(mention),
+      authorName: mention.authorName ?? mention.authorId,
+      channelName: mention.channelName,
+      extra,
+      now: todayKoreanString(),
+    }),
+    config,
+    agents: {},
+    allowedTools: scope.allowedTools,
+    disallowedTools: scope.disallowedTools,
+    systemPrompt: watchpupSystemPrompt(config.botName, config.persona),
+    isResume: false,
+    addDirs,
+    mcpConfigPath,
+    secretEnv,
+    permissionMode: 'default',
+  })
+  return parseReminderDraft(result.text)
 }
 
 export async function chatFollowup(

@@ -8,6 +8,8 @@ import { loadSettings, loadPlaybooks, showSset, setOnPlaybooksChanged } from './
 import { state, getChat, getActionLog, sortedMentions, nav } from './store.js'
 import { renderDigest, renderTodosView } from './views.js'
 import { renderActivityDetail, renderDetail } from './detail.js'
+import { focusWorkItem, initWorkView, refreshWorkView } from './work.js'
+import { normalizePanelTab, readPanelTab, writePanelTab, PANEL_TAB_ORDER, keyToTabIndex, cycleTabIndex } from './tab-state.js'
 
 // playbook 변경 시 열린 상세의 액션 버튼 갱신(settings→panel 결합을 훅으로만)
 setOnPlaybooksChanged(() => {
@@ -185,6 +187,7 @@ async function refresh() {
 let listQuery = ''
 let listCat = '' // '' = 전체
 let todoOnly = false
+let mentionSortOrder = 'lastMessage' // 'lastMessage'(기본) | 'fetched'
 let pendingThreadImportId = null
 let importedThreadId = null
 function matchesCat(m) {
@@ -194,7 +197,7 @@ function matchesCat(m) {
 function renderList() {
   listEl.innerHTML = ''
   const q = listQuery.trim().toLowerCase()
-  const items = sortedMentions().filter((m) => matchesCat(m) && matchesQuery(m, q) && (!todoOnly || hasOpenTodos(m)))
+  const items = sortedMentions(mentionSortOrder).filter((m) => matchesCat(m) && matchesQuery(m, q) && (!todoOnly || hasOpenTodos(m)))
   if (!items.length) {
     const empty = document.createElement('p')
     empty.className = 'list-empty'
@@ -335,25 +338,38 @@ window.watchpup.onMentionReady((m) => {
 if (window.watchpup.onMentionsRefresh) window.watchpup.onMentionsRefresh(() => refresh())
 
 // ---- 탭 전환 ----
+function activateTab(name, { persist = true } = {}) {
+  const normalized = normalizePanelTab(name)
+  const tab = document.querySelector(`.tab[data-tab="${normalized}"]`)
+  const view = document.getElementById(normalized + '-view')
+  if (!tab || !view) return
+
+  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'))
+  document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'))
+  tab.classList.add('active')
+  view.classList.add('active')
+  if (persist) writePanelTab(normalized)
+
+  if (normalized === 'settings') {
+    loadSettings()
+    loadPlaybooks()
+    showSset('detect')
+  } else if (normalized === 'digest') {
+    refresh().then(renderDigest).catch(renderDigest)
+  } else if (normalized === 'todos') {
+    refresh().then(renderTodosView).catch(renderTodosView)
+  } else if (normalized === 'agent') {
+    refreshActivities().catch(() => {})
+  } else if (normalized === 'work') {
+    initWorkView().catch(() => {})
+  }
+}
+
 document.querySelectorAll('.tab').forEach((tab) => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'))
-    document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'))
-    tab.classList.add('active')
-    document.getElementById(tab.dataset.tab + '-view').classList.add('active')
-    if (tab.dataset.tab === 'settings') {
-      loadSettings()
-      loadPlaybooks()
-      showSset('detect')
-    } else if (tab.dataset.tab === 'digest') {
-      refresh().then(renderDigest).catch(renderDigest)
-    } else if (tab.dataset.tab === 'todos') {
-      refresh().then(renderTodosView).catch(renderTodosView)
-    } else if (tab.dataset.tab === 'agent') {
-      refreshActivities().catch(() => {})
-    }
-  })
+  tab.addEventListener('click', () => activateTab(tab.dataset.tab))
 })
+
+activateTab(readPanelTab(), { persist: false })
 
 // ESC: 텍스트 입력 중이면 먼저 포커스 해제, 아니면 패널 닫기(숨김)
 document.addEventListener('keydown', (e) => {
@@ -364,6 +380,21 @@ document.addEventListener('keydown', (e) => {
   } else {
     window.watchpup.hidePanel()
   }
+})
+// Cmd+1..9: 탭 즉시 전환
+document.addEventListener('keydown', (e) => {
+  if (!e.metaKey) return
+  if (e.key === '[' || e.key === ']') {
+    const current = PANEL_TAB_ORDER.indexOf(readPanelTab())
+    const next = cycleTabIndex(current, e.key === '[' ? -1 : 1, PANEL_TAB_ORDER.length)
+    activateTab(PANEL_TAB_ORDER[next])
+    e.preventDefault()
+    return
+  }
+  const index = keyToTabIndex(e.key, PANEL_TAB_ORDER.length)
+  if (index === null) return
+  activateTab(PANEL_TAB_ORDER[index])
+  e.preventDefault()
 })
 // 맥 스타일 창 컨트롤(신호등)
 const wcClose = document.getElementById('wc-close')
@@ -379,6 +410,21 @@ if (searchInput) {
   searchInput.addEventListener('input', () => {
     listQuery = searchInput.value
     renderList()
+  })
+}
+
+// 멘션 정렬(최근 메시지순 기본 / 가져온 순서) — 저장된 설정 복원 + 변경 시 저장
+const mentionSortSelect = document.getElementById('mention-sort')
+window.watchpup.settingsGet().then((config) => {
+  mentionSortOrder = config.mentionSortOrder === 'fetched' ? 'fetched' : 'lastMessage'
+  if (mentionSortSelect) mentionSortSelect.value = mentionSortOrder
+  renderList()
+}).catch(() => {})
+if (mentionSortSelect) {
+  mentionSortSelect.addEventListener('change', () => {
+    mentionSortOrder = mentionSortSelect.value
+    renderList()
+    window.watchpup.settingsSet({ mentionSortOrder }).catch((e) => console.error('settingsSet 실패', e))
   })
 }
 
@@ -605,10 +651,9 @@ if (agentListDivider) {
   })
 }
 
-// 펫 클릭으로 열 때: 항상 멘션 탭부터(직전 설정 탭 잔상 방지)
 function ensureTab(name) {
   const tab = document.querySelector(`.tab[data-tab="${name}"]`)
-  if (tab && !tab.classList.contains('active')) tab.click()
+  if (tab && !tab.classList.contains('active')) activateTab(name)
 }
 function ensureMentionsTab() {
   ensureTab('mentions')
@@ -616,8 +661,8 @@ function ensureMentionsTab() {
 function ensureAgentTab() {
   ensureTab('agent')
 }
-if (window.watchpup.onPanelShown) {
-  window.watchpup.onPanelShown(() => ensureMentionsTab())
+function ensureWorkTab() {
+  ensureTab('work')
 }
 // HUD의 Claude/Codex 행 클릭 → Watchpup 내부 세션 상세
 if (window.watchpup.onActivityFocus) {
@@ -659,6 +704,13 @@ if (window.watchpup.onMentionFocus) {
     refresh().then(() => {
       if (state.mentions.has(id)) select(id)
     }).catch(() => { if (state.mentions.has(id)) select(id) })
+  })
+}
+if (window.watchpup.onWorkFocus) {
+  window.watchpup.onWorkFocus((id) => {
+    if (typeof id !== 'string' || !id) return
+    ensureWorkTab()
+    focusWorkItem(id).catch(() => {})
   })
 }
 
