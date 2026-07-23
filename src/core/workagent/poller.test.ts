@@ -136,6 +136,18 @@ describe('WorkAgentPoller', () => {
     expect(run).toHaveBeenCalledTimes(2) // force는 게이트 무시
   })
 
+  it('start 직후에는 주기가 지나기 전까지 돌지 않는다', async () => {
+    const fetchTasks = vi.fn().mockResolvedValue([item({ id: 'first' })])
+    const run = vi.fn().mockResolvedValue(undefined)
+    const poller = new WorkAgentPoller(() => baseConfig, { fetchTasks, store: storeWith(), run }, { tickMs: 3_600_000 })
+    poller.start()
+    await poller.pollNow()
+    expect(run).not.toHaveBeenCalled() // 시작 시점 기준 30분이 안 지났으므로 대기
+    await poller.pollNow(true)
+    expect(run).toHaveBeenCalledTimes(1) // 강제(설정에서 켠 직후)는 즉시
+    poller.stop()
+  })
+
   it('run이 던져도 폴러는 죽지 않는다', async () => {
     const fetchTasks = vi.fn().mockResolvedValue([item({ id: 'first' })])
     const run = vi.fn().mockRejectedValue(new Error('busy'))

@@ -92,6 +92,8 @@ export class WorkAgentPoller {
 
   start(): void {
     if (this.timer) return
+    // 앱 시작 직후 바로 돌지 않도록, 시작 시점부터 주기가 지난 뒤 첫 실행
+    this.lastRunAt = Date.now()
     this.timer = setInterval(() => void this.pollNow(), this.options.tickMs ?? 60_000)
     logger.info('Work 자동 제안 폴러 시작', { tickMs: this.options.tickMs ?? 60_000 })
   }
