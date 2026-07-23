@@ -437,6 +437,18 @@ async function renderWorkAgentSection(host, item) {
 
       const planBox = el('details', 'work-agent-plan')
       const planToggle = el('summary', '', '계획 보기')
+      const planOpen = el('button', 'work-agent-plan-open', '파일로 열기 ↗')
+      planOpen.type = 'button'
+      planOpen.title = '계획 파일(WATCHPUP-PLAN.md)을 기본 앱으로 엽니다'
+      planOpen.addEventListener('click', async (event) => {
+        event.preventDefault()
+        try {
+          await window.watchpup.workAgentPlanOpen(item.id)
+        } catch (error) {
+          hintEl.textContent = error?.message || '계획 파일을 열지 못했습니다.'
+        }
+      })
+      planToggle.append(planOpen)
       planBox.append(planToggle)
       const planBody = el('div', 'work-agent-plan-body')
       planBox.append(planBody)

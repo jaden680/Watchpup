@@ -399,6 +399,13 @@ async function main(): Promise<void> {
       return { content: '' }
     }
   })
+  // 계획 파일을 기본 앱(에디터)으로 열기 — 카드 밖에서 전문을 읽고 싶을 때
+  ipcMain.handle(CMD.workAgentPlanOpen, (_e, reminderId: string) => {
+    const proposal = workAgent.proposal(reminderId)
+    const planPath = proposal?.worktreePath ? join(proposal.worktreePath, PLAN_FILE) : ''
+    if (!planPath || !existsSync(planPath)) throw new Error('계획 파일을 찾지 못했어요.')
+    return shell.openPath(planPath)
+  })
   // 계획 논의(채팅): 제안 세션을 resume해 이어간다. 계획 파일 수정은 카드가 다시 읽는다.
   ipcMain.handle(CMD.workAgentChat, async (_e, args: { reminderId: string; text: string }) => {
     const proposal = workAgent.proposal(args.reminderId)

@@ -47,6 +47,7 @@ export const CMD = {
   workAgentDismiss: 'workagent.dismiss',
   workAgentOpen: 'workagent.open',
   workAgentPlan: 'workagent.plan.read',
+  workAgentPlanOpen: 'workagent.plan.open',
   workAgentChat: 'workagent.chat',
 } as const
 

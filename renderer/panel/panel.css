@@ -2245,3 +2245,8 @@ details.review .hint { margin: 0; }
 .work-link-edit input[type="text"] { flex: 0 1 140px; }
 .work-link-edit input[type="url"] { flex: 1 1 200px; }
 .work-link-edit input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.work-agent-plan summary .work-agent-plan-open {
+  margin-left: var(--sp-2); padding: 2px 8px; font-size: 10.5px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--bg-elev); color: var(--fg-muted);
+}
+.work-agent-plan summary .work-agent-plan-open:hover { color: var(--fg); border-color: var(--border-strong); }
