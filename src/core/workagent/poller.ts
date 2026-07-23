@@ -1,6 +1,7 @@
 /**
- * Work 자동 제안 폴러: 주기적으로 Work 목록 상위 작업을 확인해, 아직 제안이 없는 작업을
- * 하나 골라 에이전트 실행을 트리거한다. 한 번에 하나씩만 실행(순차).
+ * Work 자동 제안 폴러: 주기적으로 Work 목록을 확인해, 아직 제안이 없는 작업을
+ * 목록 순서대로 하나 골라 에이전트 실행을 트리거한다. 주기당 1개씩 실행하며
+ * 시간이 지나면 미완료 작업 전체가 순서대로 제안을 갖게 된다.
  *
  * 자동 제안 제외 조건:
  *  - 태스크별 설정에서 자동 제안 off (prefs.auto === false)
@@ -14,8 +15,6 @@ export interface WorkAgentPollerConfig {
   enabled: boolean
   listId: string
   intervalMinutes: number
-  /** 자동 제안 후보로 삼을 목록 상위 개수 */
-  topN: number
   sortOrder: string
   manualOrder: string[]
 }
@@ -56,13 +55,13 @@ export function orderedTopLevelItems(items: WorkItem[], sortOrder: string, manua
   return [...topLevel].sort(compareDueThenTitle)
 }
 
-/** 상위 topN 중 자동 제안 대상 1건을 고른다. 없으면 null. */
+/** 목록 순서대로 자동 제안 대상 1건을 고른다 (전체 순회). 없으면 null. */
 export function pickAutoTarget(
   items: WorkItem[],
-  config: Pick<WorkAgentPollerConfig, 'topN' | 'sortOrder' | 'manualOrder'>,
+  config: Pick<WorkAgentPollerConfig, 'sortOrder' | 'manualOrder'>,
   store: TargetStore,
 ): WorkAgentTarget | null {
-  const candidates = orderedTopLevelItems(items, config.sortOrder, config.manualOrder).slice(0, Math.max(1, config.topN))
+  const candidates = orderedTopLevelItems(items, config.sortOrder, config.manualOrder)
   for (const item of candidates) {
     if (store.prefs(item.id).auto === false) continue
     if (store.proposal(item.id)) continue

@@ -238,7 +238,6 @@ async function main(): Promise<void> {
         enabled: current.workAgentEnabled,
         listId: current.reminderListId,
         intervalMinutes: current.workAgentIntervalMinutes,
-        topN: current.workAgentTopN,
         sortOrder: current.reminderTaskSortOrder,
         manualOrder: current.reminderTaskManualOrder,
       }

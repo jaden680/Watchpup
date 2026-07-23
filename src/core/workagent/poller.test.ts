@@ -47,9 +47,9 @@ describe('orderedTopLevelItems', () => {
 })
 
 describe('pickAutoTarget', () => {
-  const config = { topN: 3, sortOrder: 'dueDateThenTitle', manualOrder: [] as string[] }
+  const config = { sortOrder: 'dueDateThenTitle', manualOrder: [] as string[] }
 
-  it('상위 N 중 제안 없고 자동이 켜진 첫 작업을 고른다', () => {
+  it('목록 순서에서 제안 없고 자동이 켜진 첫 작업을 고른다', () => {
     const items = [
       item({ id: 'first', dueAt: 1 }),
       item({ id: 'second', dueAt: 2 }),
@@ -73,12 +73,16 @@ describe('pickAutoTarget', () => {
     expect(pickAutoTarget(items, config, storeWith({ prefs }))?.item.id).toBe('second')
   })
 
-  it('상위 N 밖의 작업은 후보가 아니다', () => {
+  it('앞 작업들에 제안이 차 있으면 다음 작업으로 넘어간다 (전체 순회)', () => {
     const items = [1, 2, 3, 4].map((n) => item({ id: `t${n}`, dueAt: n }))
     const proposals = Object.fromEntries(
       ['t1', 't2', 't3'].map((id) => [id, { reminderId: id, status: 'ready' } as WorkProposal]),
     )
-    expect(pickAutoTarget(items, config, storeWith({ proposals }))).toBeNull()
+    expect(pickAutoTarget(items, config, storeWith({ proposals }))?.item.id).toBe('t4')
+    const allDone = Object.fromEntries(
+      ['t1', 't2', 't3', 't4'].map((id) => [id, { reminderId: id, status: 'ready' } as WorkProposal]),
+    )
+    expect(pickAutoTarget(items, config, storeWith({ proposals: allDone }))).toBeNull()
   })
 
   it('선택된 작업의 서브태스크를 함께 돌려준다', () => {
@@ -93,7 +97,6 @@ describe('WorkAgentPoller', () => {
     enabled: true,
     listId: 'list',
     intervalMinutes: 30,
-    topN: 3,
     sortOrder: 'dueDateThenTitle',
     manualOrder: [] as string[],
   }
