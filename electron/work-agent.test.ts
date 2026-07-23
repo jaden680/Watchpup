@@ -3,29 +3,19 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { proposalResumeCommand, resolveWorkAgentRepo } from './work-agent.js'
-import type { WatchpupConfig } from '../src/core/config/schema.js'
 import type { WorkProposal } from '../src/core/workagent/types.js'
 
-function gitRepo(root: string, name: string): string {
-  const path = join(root, name)
-  mkdirSync(join(path, '.git'), { recursive: true })
-  return path
-}
-
 describe('resolveWorkAgentRepo', () => {
-  it('태스크 지정 레포 → 기본 레포 순서만 보고, 자동 추론은 하지 않는다', () => {
+  it('태스크별 지정 레포만 인정하고, 없거나 유효하지 않으면 null', () => {
     const root = mkdtempSync(join(tmpdir(), 'watchpup-repos-'))
     try {
-      const zigzag = gitRepo(root, 'zigzag-ios-1')
-      const preferred = gitRepo(root, 'preferred')
-      const config = { repos: [zigzag], workAgentRepo: '' } as unknown as WatchpupConfig
+      const preferred = join(root, 'preferred')
+      mkdirSync(join(preferred, '.git'), { recursive: true })
 
-      expect(resolveWorkAgentRepo(config, preferred)).toBe(preferred)
-      expect(resolveWorkAgentRepo({ ...config, workAgentRepo: zigzag } as WatchpupConfig)).toBe(zigzag)
-      // 레포 미지정이면 등록 레포가 있어도 null (자동 폴백 없음)
-      expect(resolveWorkAgentRepo(config)).toBeNull()
-      // 존재하지 않는 경로는 무시
-      expect(resolveWorkAgentRepo(config, join(root, 'ghost'))).toBeNull()
+      expect(resolveWorkAgentRepo(preferred)).toBe(preferred)
+      expect(resolveWorkAgentRepo()).toBeNull()
+      expect(resolveWorkAgentRepo('')).toBeNull()
+      expect(resolveWorkAgentRepo(join(root, 'ghost'))).toBeNull()
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

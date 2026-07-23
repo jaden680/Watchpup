@@ -582,7 +582,7 @@ async function renderWorkAgentSection(host, item) {
   model.value = prefs.model || ''
   // 태스크별 레포: 여러 레포 사용 시 이 작업이 어느 레포에서 진행될지 고정
   const repo = el('select')
-  const repoAuto = el('option', '', '기본 레포 따름')
+  const repoAuto = el('option', '', '레포 선택 (없으면 제안 안 함)')
   repoAuto.value = ''
   repo.append(repoAuto)
   window.watchpup.reposList().then((paths) => {

@@ -180,8 +180,8 @@ async function main(): Promise<void> {
     const prefs = workAgent.prefs(item.id)
     const provider = prefs.provider || current.workAgentProvider
     const model = (prefs.model?.trim() || (provider === 'codex' ? current.workAgentCodexModel : current.workAgentModel)).trim()
-    const repoPath = resolveWorkAgentRepo(current, prefs.repo)
-    if (!repoPath) throw new Error('작업할 레포가 지정되지 않았어요. 카드에서 레포를 고르거나 설정 → Work 에이전트에서 기본 레포를 정해주세요.')
+    const repoPath = resolveWorkAgentRepo(prefs.repo)
+    if (!repoPath) throw new Error('작업할 레포가 지정되지 않았어요. 작업 카드에서 레포를 골라주세요.')
     workAgentBusy = true
     try {
       // 재실행이면 이전 worktree를 먼저 정리
@@ -248,7 +248,7 @@ async function main(): Promise<void> {
         proposal: (reminderId) => workAgent.proposal(reminderId),
         prefs: (reminderId) => workAgent.prefs(reminderId),
         // 레포가 지정되지 않은 작업(태스크별·기본 레포 모두 없음)은 자동 제안하지 않는다
-        resolveRepo: (target) => resolveWorkAgentRepo(configStore.get(), workAgent.prefs(target.id).repo),
+        resolveRepo: (target) => resolveWorkAgentRepo(workAgent.prefs(target.id).repo),
       },
       run: (target) => runWorkAgentFor(target.item, target.subtasks, 'auto'),
     },
@@ -368,7 +368,7 @@ async function main(): Promise<void> {
     const items = await reminders.tasks(current.reminderListId, false)
     const item = items.find((candidate) => candidate.id === reminderId)
     if (!item) throw new Error('작업을 찾지 못했어요.')
-    if (!resolveWorkAgentRepo(current, workAgent.prefs(reminderId).repo)) throw new Error('작업할 레포가 지정되지 않았어요. 카드에서 레포를 고르거나 설정 → Work 에이전트에서 기본 레포를 정해주세요.')
+    if (!resolveWorkAgentRepo(workAgent.prefs(reminderId).repo)) throw new Error('작업할 레포가 지정되지 않았어요. 작업 카드에서 레포를 골라주세요.')
     // 실행은 수 분 걸릴 수 있어 시작만 하고, 결과는 workagent.changed 이벤트로 전달한다.
     void runWorkAgentFor(item, items.filter((candidate) => candidate.parentId === item.id), 'manual')
       .catch((e) => console.error('workagent 수동 실행 실패', e))

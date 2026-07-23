@@ -5,7 +5,6 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import type { WatchpupConfig } from '../src/core/config/schema.js'
 import type { WorkProposal } from '../src/core/workagent/types.js'
 import { switchToOrcaTerminal } from './work-agent-orca.js'
 
@@ -76,11 +75,10 @@ export async function openProposalSession(proposal: WorkProposal): Promise<{ via
 }
 
 /**
- * 작업할 레포 결정: 태스크별 지정 레포 → 설정의 기본 레포. 자동 추론은 하지 않는다.
- * 둘 다 없으면 null — 자동 제안 대상에서 제외되고, 수동 실행은 레포 지정을 안내한다.
+ * 작업할 레포 결정: 태스크별로 지정한 레포만 인정한다. 기본값·자동 추론 없음.
+ * 없으면 null — 자동 제안 대상에서 제외되고, 수동 실행은 레포 지정을 안내한다.
  */
-export function resolveWorkAgentRepo(config: WatchpupConfig, preferredRepo?: string): string | null {
+export function resolveWorkAgentRepo(preferredRepo?: string): string | null {
   if (preferredRepo && existsSync(join(preferredRepo, '.git'))) return preferredRepo
-  if (config.workAgentRepo && existsSync(join(config.workAgentRepo, '.git'))) return config.workAgentRepo
   return null
 }

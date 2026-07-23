@@ -264,25 +264,6 @@ async function loadModelCatalog(current, force = false) {
 
 modelRefreshButton?.addEventListener('click', () => loadModelCatalog(modelSelect.value, true))
 
-// Work 에이전트 기본 레포: 등록된 코드 레포 중에서 선택 ('' = 자동 매칭)
-async function renderWorkAgentRepoOptions(current) {
-  const select = settingsForm.elements['workAgentRepo']
-  if (!select) return
-  let repos = []
-  try {
-    repos = await window.watchpup.reposList()
-  } catch { /* 레포 목록이 없어도 자동 옵션은 유지 */ }
-  const options = [{ value: '', label: '없음 — 레포 지정된 작업만 자동 제안' }, ...repos.map((path) => ({ value: path, label: path }))]
-  if (current && !repos.includes(current)) options.push({ value: current, label: `현재 저장값 (${current})` })
-  select.replaceChildren(...options.map(({ value, label }) => {
-    const option = document.createElement('option')
-    option.value = value
-    option.textContent = label
-    return option
-  }))
-  select.value = current || ''
-}
-
 function updatePetSizeLabel() {
   if (petSizeInput && petSizeValue) petSizeValue.textContent = `${petSizeInput.value}%`
 }
@@ -444,7 +425,6 @@ async function loadSettings() {
     settingsForm.elements['workAgentCodexModel'].value = cfg.workAgentCodexModel || ''
     settingsForm.elements['workAgentIntervalMinutes'].value = cfg.workAgentIntervalMinutes || 30
     renderWorkAgentModelOptions(cfg.workAgentModel || '')
-    await renderWorkAgentRepoOptions(cfg.workAgentRepo || '')
   }
   await refreshTokenStatus()
   await renderGroups()
@@ -910,7 +890,6 @@ settingsForm.addEventListener('submit', async (e) => {
     patch.workAgentProvider = settingsForm.elements['workAgentProvider'].value === 'codex' ? 'codex' : 'claude'
     patch.workAgentModel = settingsForm.elements['workAgentModel']?.value ?? ''
     patch.workAgentCodexModel = settingsForm.elements['workAgentCodexModel']?.value.trim() ?? ''
-    patch.workAgentRepo = settingsForm.elements['workAgentRepo']?.value ?? ''
     const workAgentInterval = parseInt(settingsForm.elements['workAgentIntervalMinutes']?.value ?? '', 10)
     if (Number.isFinite(workAgentInterval)) patch.workAgentIntervalMinutes = Math.min(240, Math.max(5, workAgentInterval))
   }

@@ -165,7 +165,6 @@ export interface SettingsPatch {
   workAgentModel?: string
   workAgentCodexModel?: string
   workAgentIntervalMinutes?: number
-  workAgentRepo?: string
   reminderTaskSortOrder?: 'manual' | 'dueDateThenTitle' | 'createdNewest' | 'updatedNewest' | 'titleAscending'
   reminderTaskManualOrder?: string[]
   showCompletedReminders?: boolean
