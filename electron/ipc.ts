@@ -34,6 +34,8 @@ export const CMD = {
   workReminderNoteUpdate: 'work.reminder.note.update',
   workReminderComplete: 'work.reminder.complete',
   workReminderLinkAdd: 'work.reminder.link.add',
+  workReminderLinkRemove: 'work.reminder.link.remove',
+  workReminderLinkUpdate: 'work.reminder.link.update',
   workItemTouch: 'work.item.touch',
   workLinkStatus: 'work.link.status',
   workLinkAction: 'work.link.action',

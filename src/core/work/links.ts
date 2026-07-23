@@ -66,6 +66,58 @@ export function parseWorkLinks(text: string): WorkLink[] {
   return links
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * notes 본문에서 특정 링크(markdown [제목](url) 또는 plain URL)를 replacement로 치환한다.
+ * 사용자 메모(<note> 블록)는 건드리지 않고, 치환 결과 빈 줄이 되면 정리한다.
+ * 매칭이 없으면 원본을 그대로 반환한다.
+ */
+function transformWorkLinkInNotes(notes: string, url: string, replacement: string): string {
+  const target = url.trim()
+  if (!target) return notes
+  // <note> 블록을 자리표시자(NUL)로 치환해 보호
+  const blocks: string[] = []
+  const masked = notes.replace(/<note>[\s\S]*?<\/note>/gi, (block) => {
+    blocks.push(block)
+    return `\u0000${blocks.length - 1}\u0000`
+  })
+  // 치환 텍스트에 같은 URL이 들어가도(제목만 수정) 다시 매칭되지 않게 sentinel로 표시 후 마지막에 대입
+  const sentinel = '\u0001'
+  // URL.toString() 정규화로 끝 슬래시가 붙거나 빠졌을 수 있어 두 형태 모두 후보로
+  const candidates = [...new Set([target, target.endsWith('/') ? target.slice(0, -1) : `${target}/`])]
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+  let replaced = masked
+  for (const candidate of candidates) {
+    const escaped = escapeRegExp(candidate)
+    // 더 긴 URL의 접두어를 지우지 않도록 URL 문자가 이어지면 매칭 제외
+    replaced = replaced
+      .replace(new RegExp(`\\[[^\\]]*]\\(${escaped}\\)`, 'gi'), sentinel)
+      .replace(new RegExp(`${escaped}(?![^\\s<>()\\]])`, 'gi'), sentinel)
+  }
+  if (replaced === masked) return notes
+  replaced = replaced.replaceAll(sentinel, replacement)
+  const cleaned = replaced
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .join('\n')
+  return cleaned.replace(/\u0000(\d+)\u0000/g, (_, index) => blocks[Number(index)]).trim()
+}
+
+/** notes에서 특정 링크 제거. 제거된 게 없으면 원본 그대로. */
+export function removeWorkLinkFromNotes(notes: string, url: string): string {
+  return transformWorkLinkInNotes(notes, url, '')
+}
+
+/** notes에서 특정 링크의 제목·URL을 수정. 매칭이 없으면 원본 그대로. */
+export function replaceWorkLinkInNotes(notes: string, url: string, next: { title: string; url: string }): string {
+  const title = next.title.trim().replace(/[[\]]/g, '')
+  return transformWorkLinkInNotes(notes, url, `[${title || next.url}](${next.url})`)
+}
+
 export function parseJiraLink(value: string): { site: string; key: string } | null {
   try {
     const url = new URL(value)

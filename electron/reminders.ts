@@ -10,7 +10,7 @@ import type { NaggingCalendarEvent } from '../src/core/presentation/nagging.js'
 const execFileAsync = promisify(execFile)
 
 export type CalendarAuthorizationStatus = 'not-determined' | 'restricted' | 'denied' | 'write-only' | 'authorized' | 'unknown'
-export type ReminderCommand = 'lists' | 'tasks' | 'create' | 'add-subtask' | 'update-title' | 'update-user-note' | 'set-completed' | 'set-due' | 'append-link' | 'upcoming-events' | 'authorization-status' | 'request-calendar-access'
+export type ReminderCommand = 'lists' | 'tasks' | 'create' | 'add-subtask' | 'update-title' | 'update-user-note' | 'set-notes' | 'set-completed' | 'set-due' | 'append-link' | 'upcoming-events' | 'authorization-status' | 'request-calendar-access'
 export type ReminderCommandRunner = (command: ReminderCommand, args: string[]) => Promise<string>
 export type CalendarCommandRunner = (command: 'upcoming-events' | 'authorization-status' | 'request-calendar-access', args: string[]) => Promise<string>
 
@@ -184,6 +184,11 @@ export class ReminderGateway {
 
   async updateUserNote(reminderId: string, note: string): Promise<void> {
     await this.runCommand('update-user-note', [reminderId, note.trim()])
+  }
+
+  /** notes 본문 전체 교체 — 링크 제거 등 구조 편집용 (사용자 메모 보존은 호출측 책임) */
+  async setNotes(reminderId: string, notes: string): Promise<void> {
+    await this.runCommand('set-notes', [reminderId, notes])
   }
 
   async appendLink(reminderId: string, title: string, url: string): Promise<void> {

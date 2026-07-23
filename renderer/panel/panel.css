@@ -2235,3 +2235,13 @@ details.review .hint { margin: 0; }
 .repos-scan-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
 .repos-scan-row { display: flex; align-items: center; gap: var(--sp-2); font-size: 12.5px; color: var(--fg); cursor: pointer; }
 .repos-scan-row input:disabled + .repo-name { color: var(--fg-faint); }
+
+/* 링크 편집 인라인 폼 */
+.work-link-edit { display: flex; flex: 1; gap: var(--sp-2); align-items: center; }
+.work-link-edit input {
+  font: inherit; font-size: 12px; color: var(--fg);
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--r-2); padding: 6px 8px;
+}
+.work-link-edit input[type="text"] { flex: 0 1 140px; }
+.work-link-edit input[type="url"] { flex: 1 1 200px; }
+.work-link-edit input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }

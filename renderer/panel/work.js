@@ -104,7 +104,7 @@ function renderEmpty() {
   detailEl.innerHTML = '<div class="empty"><div class="empty-mark">⌁</div><p class="empty-title">왼쪽에서 작업을 골라보세요</p><p class="empty-sub">Reminder 메모에 업무 링크를 한곳에 모아볼 수 있습니다.</p></div>'
 }
 
-function linkRow(link) {
+function linkRow(link, item) {
   const row = el('div', 'work-link-row')
   const badge = el('span', `work-link-badge kind-${link.kind}`, KIND_LABEL[link.kind] || 'Web')
   const info = el('div', 'work-link-info')
@@ -118,12 +118,32 @@ function linkRow(link) {
     copy.textContent = '완료'
     setTimeout(() => { copy.textContent = '복사' }, 1000)
   })
+  const edit = el('button', '', '✎')
+  edit.type = 'button'
+  edit.title = '링크 편집'
+  edit.setAttribute('aria-label', '링크 편집')
+  edit.addEventListener('click', () => renderLinkEditor(row, link, item))
+  const remove = el('button', '', '×')
+  remove.type = 'button'
+  remove.title = '링크 삭제'
+  remove.setAttribute('aria-label', '링크 삭제')
+  remove.addEventListener('click', async () => {
+    if (!window.confirm(`이 링크를 지울까요?\n\n${link.title || link.host}\n${link.url}`)) return
+    remove.disabled = true
+    try {
+      await window.watchpup.workReminderLinkRemove(item.id, link.url)
+      await refreshWorkView({ preserveSelection: true })
+    } catch (error) {
+      hintEl.textContent = error?.message || '링크를 지우지 못했습니다.'
+      remove.disabled = false
+    }
+  })
   const open = el('button', 'primary', '↗')
   open.type = 'button'
   open.title = '외부에서 열기'
   open.setAttribute('aria-label', `${KIND_LABEL[link.kind] || '링크'} 외부에서 열기`)
   open.addEventListener('click', () => window.watchpup.openExternal(link.url))
-  actions.append(copy, open)
+  actions.append(copy, edit, remove, open)
   row.append(badge, info, actions)
   if (link.kind === 'jira' || link.kind === 'github') {
     const statusHost = el('div', 'work-link-status loading', '상태 불러오는 중…')
@@ -136,6 +156,38 @@ function linkRow(link) {
       })
   }
   return row
+}
+
+function renderLinkEditor(row, link, item) {
+  const form = el('form', 'work-link-edit')
+  const title = el('input')
+  title.type = 'text'
+  title.value = link.title || ''
+  title.placeholder = '링크 이름'
+  const url = el('input')
+  url.type = 'url'
+  url.value = link.url
+  url.required = true
+  const save = el('button', 'primary', '저장')
+  save.type = 'submit'
+  const cancel = el('button', '', '취소')
+  cancel.type = 'button'
+  cancel.addEventListener('click', () => renderDetail())
+  form.append(title, url, save, cancel)
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    if (!window.confirm(`링크를 이렇게 수정할까요?\n\n${title.value.trim() || '(이름 없음)'}\n${url.value.trim()}`)) return
+    save.disabled = true
+    try {
+      await window.watchpup.workReminderLinkUpdate(item.id, link.url, title.value, url.value.trim())
+      await refreshWorkView({ preserveSelection: true })
+    } catch (error) {
+      hintEl.textContent = error?.message || '링크를 수정하지 못했습니다.'
+      save.disabled = false
+    }
+  })
+  row.replaceChildren(el('span', `work-link-badge kind-${link.kind}`, KIND_LABEL[link.kind] || 'Web'), form)
+  title.focus()
 }
 
 function renderLinkStatus(host, link, status) {
@@ -227,7 +279,7 @@ function renderDetail() {
   linkHead.append(el('h2', '', '연결된 링크'), el('span', 'work-link-count', `${item.links?.length || 0}`))
   linksSection.append(linkHead)
   const links = el('div', 'work-links')
-  if (item.links?.length) item.links.forEach((link) => links.append(linkRow(link)))
+  if (item.links?.length) item.links.forEach((link) => links.append(linkRow(link, item)))
   else links.append(el('p', 'work-section-empty', '아직 연결된 링크가 없습니다.'))
   linksSection.append(links)
 

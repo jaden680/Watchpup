@@ -13,6 +13,7 @@ import { AuditStore } from '../src/core/observability/audit.js'
 import { MentionStore } from '../src/core/state/mentions.js'
 import { ReminderLinkStore, reminderKey } from '../src/core/state/reminder-links.js'
 import { parseSlackThreadPermalink } from '../src/core/slack/permalink.js'
+import { removeWorkLinkFromNotes, replaceWorkLinkInNotes } from '../src/core/work/links.js'
 import { buildMentionReminder, type MentionReminderLink } from '../src/core/work/mention-reminder.js'
 import { LessonStore } from '../src/core/state/lessons.js'
 import { bubbleReady as bubbleReadyText, bubbleFollowup as bubbleFollowupText, bubbleAnalyzing as bubbleAnalyzingText, type BubbleStyle } from '../src/core/presentation/bubble.js'
@@ -309,6 +310,31 @@ async function main(): Promise<void> {
   })
   ipcMain.handle(CMD.workReminderLinkAdd, async (_e, args: { reminderId: string; title: string; url: string }) => {
     await reminders.appendLink(args.reminderId, args.title, args.url)
+    return { ok: true }
+  })
+  // 링크 제거·수정: notes에서 해당 링크만 바꾼다 (<note> 사용자 메모는 보존)
+  async function findWorkItemById(reminderId: string): Promise<WorkItem> {
+    const listId = configStore.get().reminderListId
+    if (!listId) throw new Error('먼저 Work 목록을 선택해주세요.')
+    const item = (await reminders.tasks(listId, true)).find((candidate) => candidate.id === reminderId)
+    if (!item) throw new Error('작업을 찾지 못했어요.')
+    return item
+  }
+  ipcMain.handle(CMD.workReminderLinkRemove, async (_e, args: { reminderId: string; url: string }) => {
+    const item = await findWorkItemById(args.reminderId)
+    const next = removeWorkLinkFromNotes(item.notes, args.url)
+    if (next === item.notes) throw new Error('메모에서 해당 링크를 찾지 못했어요.')
+    await reminders.setNotes(args.reminderId, next)
+    return { ok: true }
+  })
+  ipcMain.handle(CMD.workReminderLinkUpdate, async (_e, args: { reminderId: string; url: string; title: string; newUrl: string }) => {
+    const parsed = new URL(args.newUrl)
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('http 또는 https 링크만 사용할 수 있어요.')
+    const item = await findWorkItemById(args.reminderId)
+    const title = (args.title || '').trim().replace(/[[\]]/g, '') || parsed.hostname
+    const next = replaceWorkLinkInNotes(item.notes, args.url, { title, url: parsed.toString() })
+    if (next === item.notes) throw new Error('메모에서 해당 링크를 찾지 못했어요.')
+    await reminders.setNotes(args.reminderId, next)
     return { ok: true }
   })
   ipcMain.handle(CMD.workItemTouch, (_e, reminderId: string) => {

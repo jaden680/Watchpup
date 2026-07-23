@@ -251,6 +251,18 @@ struct WatchpupRemindersHelper {
             let id = try ReminderKitBridge().addSubtask(title: title, parentReminderID: arguments[1])
             return ["ok": true, "id": id]
 
+        case "set-notes":
+            guard arguments.count >= 3 else {
+                throw HelperError.invalidArguments("set-notes에는 항목 ID와 메모 본문이 필요합니다.")
+            }
+            guard let reminder = store.calendarItem(withIdentifier: arguments[1]) as? EKReminder else {
+                throw HelperError.reminderNotFound
+            }
+            let body = arguments[2]
+            reminder.notes = body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : body
+            try store.save(reminder, commit: true)
+            return ["ok": true]
+
         case "append-link":
             guard arguments.count >= 4 else {
                 throw HelperError.invalidArguments("append-link에는 항목 ID, 이름, URL이 필요합니다.")
