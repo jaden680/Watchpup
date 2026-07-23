@@ -8,12 +8,12 @@
  */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { WatchpupConfig } from '../src/core/config/schema.js'
 import type { WorkItem } from '../src/core/work/types.js'
 import type { WorkProposal } from '../src/core/workagent/types.js'
-import { createProposalWorktree, type ProposalWorktree } from '../src/core/workagent/run.js'
+import { createProposalWorktree, cleanupWorkProposal, type ProposalWorktree } from '../src/core/workagent/run.js'
 import { workAgentSystemPrompt, workAgentPrompt, planSummary, PLAN_FILE } from '../src/core/workagent/prompt.js'
 import { logger } from '../src/core/observability/logger.js'
 
@@ -71,6 +71,8 @@ export interface OrcaProposalInput {
   repoPath: string
   model?: string
   worktreeRoot: string
+  /** 미리 생성한 영어 브랜치 슬러그 (없으면 제목 슬러그 폴백) */
+  slug?: string
   source: 'auto' | 'manual'
   /** 실행 중 확보되는 정보(worktree·터미널 핸들)를 즉시 저장 — 재시작 복구용 */
   onUpdate?: (patch: Partial<WorkProposal>) => void
@@ -90,7 +92,7 @@ export async function runWorkProposalInOrca(
 
   let created: ProposalWorktree
   try {
-    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id, input.item.title)
+    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id, input.item.title, input.slug)
   } catch (e) {
     logger.warn('Orca 제안 worktree 생성 실패 — headless 폴백', { err: String(e) })
     return null
@@ -139,12 +141,22 @@ export async function runWorkProposalInOrca(
     // 워크트리 카드에서 어떤 작업인지 보이게 표시 이름·코멘트 설정 (실패해도 무시)
     await orca(['worktree', 'set', '--worktree', `path:${resolve(wt)}`, '--display-name', `🐾 ${shortTitle}`, '--comment', '계획 세우는 중', '--json']).catch(() => {})
     await orca(['terminal', 'wait', '--terminal', handle, '--for', 'tui-idle', '--timeout-ms', '90000', '--json'], 100_000)
-    await orca(['terminal', 'send', '--terminal', handle, '--text', `${taskPath} 파일을 읽고, 그 안의 지시를 이 worktree에서 그대로 수행해줘.`, '--enter', '--json'])
+    // 텍스트와 Enter를 한 번에 보내면 TUI의 붙여넣기 처리 중 Enter가 씹힐 수 있어 분리 전송한다.
+    // 이미 제출됐다면 빈 Enter는 no-op이므로 보험으로 한 번 더 보낸다.
+    await orca(['terminal', 'send', '--terminal', handle, '--text', `${taskPath} 파일을 읽고, 그 안의 지시를 이 worktree에서 그대로 수행해줘.`, '--json'])
+    await sleep(1_500)
+    await orca(['terminal', 'send', '--terminal', handle, '--enter', '--json'])
+    await sleep(2_000)
+    await orca(['terminal', 'send', '--terminal', handle, '--enter', '--json']).catch(() => {})
     // 시작하자마자 Orca에서 바로 보이도록 해당 터미널로 전환. 수동 실행이면 Orca 앱도 앞으로.
     await orca(['terminal', 'switch', '--terminal', handle, '--json']).catch(() => {})
     if (input.source === 'manual') await orca(['open', '--json'], 10_000).catch(() => {})
   } catch (e) {
-    logger.warn('Orca 터미널 스폰 실패 — headless 폴백', { err: String(e) })
+    // 잔여물(터미널·worktree·과제 파일)을 정리하고 headless로 폴백 — 안 치우면 고아 worktree가 쌓인다
+    logger.warn('Orca 터미널 스폰 실패 — 잔여물 정리 후 headless 폴백', { err: String(e) })
+    if (handle) await orca(['terminal', 'close', '--terminal', handle, '--json']).catch(() => {})
+    await cleanupWorkProposal({ ...base, worktreePath: wt }).catch(() => {})
+    rmSync(taskPath, { force: true })
     return null
   }
 

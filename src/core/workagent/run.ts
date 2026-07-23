@@ -34,6 +34,8 @@ export interface WorkProposalInput {
   model?: string
   /** worktree들을 모아둘 디렉토리 (예: <dataDir>/work-worktrees) */
   worktreeRoot: string
+  /** 미리 생성한 영어 브랜치 슬러그 (없으면 제목 슬러그 폴백) */
+  slug?: string
   source: 'auto' | 'manual'
   onEvent?: (e: AgentStreamEvent) => void
   /** 실행 중 확보되는 정보(worktree·세션 id 등)를 즉시 저장할 수 있게 알림 — 재시작 복구용 */
@@ -46,7 +48,45 @@ function shortId(reminderId: string): string {
   return reminderId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toLowerCase() || 'task'
 }
 
-/** 브랜치·worktree 이름용 슬러그 — 작업 제목 기반 ([iOS] 같은 태그 제거, 한글 유지). 비면 id 축약. */
+/** LLM이 만든 슬러그 후보를 브랜치 이름으로 정제. 형식이 안 맞으면 빈 문자열. */
+export function sanitizeBranchSlug(text: string): string {
+  const slug = text
+    .trim()
+    .split('\n').at(-1)!
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+    .replace(/^-+|-+$/g, '')
+  return /^[a-z0-9][a-z0-9-]{1,31}$/.test(slug) ? slug : ''
+}
+
+/** 작업 제목 → 영어 브랜치 슬러그 (haiku 단발 호출). 실패하면 빈 문자열 (호출측이 한글 슬러그로 폴백). */
+export async function generateBranchSlug(deps: { config: WatchpupConfig }, title: string): Promise<string> {
+  if (!title.trim()) return ''
+  try {
+    const result = await runClaude({
+      prompt: title,
+      config: { ...deps.config, model: 'haiku', requestTimeoutMs: 45_000 },
+      agents: {},
+      allowedTools: [],
+      disallowedTools: [],
+      systemPrompt: [
+        'Convert the given task title into a short English git branch slug.',
+        'Rules: kebab-case, lowercase letters/digits/hyphens only, 2-4 words, translate Korean to English,',
+        'drop platform tags like [iOS], no ticket ids or dates. Respond with ONLY the slug, nothing else.',
+      ].join(' '),
+      isResume: false,
+    })
+    if (result.isError) return ''
+    return sanitizeBranchSlug(result.text)
+  } catch {
+    return ''
+  }
+}
+
+/** 브랜치·worktree 이름용 폴백 슬러그 — 작업 제목 기반 ([iOS] 같은 태그 제거, 한글 유지). 비면 id 축약. */
 export function branchSlug(title: string, reminderId: string): string {
   const slug = title
     .replace(/\[[^\]]*\]/g, ' ')
@@ -63,15 +103,16 @@ export interface ProposalWorktree {
   worktreePath: string
 }
 
-/** 제안용 격리 worktree 생성. 이름은 작업 제목 슬러그 기반. 실패 시 throw. */
+/** 제안용 격리 worktree 생성. 이름은 영어 슬러그(있으면) 또는 제목 슬러그. 실패 시 throw. */
 export async function createProposalWorktree(
   repoPath: string,
   worktreeRoot: string,
   reminderId: string,
   title = '',
+  englishSlug = '',
 ): Promise<ProposalWorktree> {
   if (!existsSync(join(repoPath, '.git'))) throw new Error(`git 레포가 아니에요: ${repoPath}`)
-  const slug = branchSlug(title, reminderId)
+  const slug = englishSlug || branchSlug(title, reminderId)
   const stamp = Date.now().toString(36)
   const branch = `watchpup/${slug}-${stamp}`
   const root = resolve(worktreeRoot)
@@ -101,7 +142,7 @@ export async function runWorkProposal(
 
   let created: ProposalWorktree
   try {
-    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id, input.item.title)
+    created = await createProposalWorktree(input.repoPath, input.worktreeRoot, input.item.id, input.item.title, input.slug)
   } catch (e) {
     return { ...base, finishedAt: Date.now(), error: `worktree 생성 실패: ${String(e)}` }
   }

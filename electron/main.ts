@@ -61,7 +61,7 @@ import { GithubPrNotificationPoller, githubPrNaggingLine } from '../src/core/git
 import { BuildCompletionPoller, buildCompletionLine, type BuildTool } from '../src/core/build/completion-poller.js'
 import { WorkAgentStore } from '../src/core/workagent/store.js'
 import { WorkAgentPoller } from '../src/core/workagent/poller.js'
-import { runWorkProposal, cleanupWorkProposal, chatWorkProposal } from '../src/core/workagent/run.js'
+import { runWorkProposal, cleanupWorkProposal, chatWorkProposal, generateBranchSlug } from '../src/core/workagent/run.js'
 import { PLAN_FILE } from '../src/core/workagent/prompt.js'
 import type { WorkProposal, WorkTaskPrefs } from '../src/core/workagent/types.js'
 import { openProposalSession, resolveWorkAgentRepo } from './work-agent.js'
@@ -212,9 +212,11 @@ async function main(): Promise<void> {
         broadcastWorkAgent(item.id)
       }
       const worktreeRoot = join(current.dataDir, 'work-worktrees')
+      // 브랜치명은 제목을 영어로 최적화한 슬러그 사용 (haiku 단발 호출, 실패 시 제목 슬러그 폴백)
+      const slug = await generateBranchSlug({ config: deps.config }, item.title)
       // Orca 모드(claude 전용): Orca가 실행 중이면 터미널에서 눈에 보이게 실행, 아니면 headless 폴백
       let result = provider === 'claude' && current.workAgentUseOrca
-        ? await runWorkProposalInOrca({ config: deps.config }, { item, subtasks, repoPath, model, worktreeRoot, source, onUpdate, signal })
+        ? await runWorkProposalInOrca({ config: deps.config }, { item, subtasks, repoPath, model, worktreeRoot, slug, source, onUpdate, signal })
         : null
       result ??= await runWorkProposal({ config: deps.config, keychain }, {
         item,
@@ -223,6 +225,7 @@ async function main(): Promise<void> {
         provider,
         model,
         worktreeRoot,
+        slug,
         source,
         onUpdate,
         signal,
